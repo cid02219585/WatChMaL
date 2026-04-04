@@ -97,6 +97,7 @@ def plot_rocs(runs, signal_labels, background_labels, selection=None, ax=None, f
         selected_discriminator = r.discriminator(signal_labels, background_labels)[run_selection]
         fpr, tpr, _ = metrics.roc_curve(selected_signal, selected_discriminator)
         auc = metrics.auc(fpr, tpr)
+        print(f"{r.plot_args['label']}: AUC = {auc}")
         args = {**plot_args, **r.plot_args}
         args['label'] = f"{args['label']} (AUC={auc:.{auc_digits}f})"
         if mode == 'rejection':
