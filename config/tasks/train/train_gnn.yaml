@@ -1,3 +1,10 @@
+defaults:
+ - /optimizers: adam
+ - /loss: cross_entropy
+ - /scheduler: coslr_warmrestarts
+ - /sampler@data_loaders.train.sampler: subset_random
+ - /sampler@data_loaders.validation.sampler: subset_random
+
 epochs: 10
 
 val_interval: 100
@@ -10,8 +17,10 @@ data_loaders:
     split_key: train_idxs
     batch_size: 32
     num_workers: 8
+    is_graph: false
   validation:
     split_key: val_idxs
     batch_size: 32
     num_workers: 8
     drop_last: true
+    is_graph: false

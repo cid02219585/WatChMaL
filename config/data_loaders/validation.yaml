@@ -5,3 +5,4 @@ validation:
   batch_size: 8192
   num_workers: 4
   drop_last: true
+  is_graph: false

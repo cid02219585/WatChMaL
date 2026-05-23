@@ -4,3 +4,4 @@ test:
   split_key: test_idxs
   batch_size: 8192
   num_workers: 4
+  is_graph: false

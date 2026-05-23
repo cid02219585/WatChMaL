@@ -76,8 +76,15 @@ def get_data_loader(dataset, batch_size, sampler, num_workers, is_distributed, i
         
         sampler = DistributedSamplerWrapper(sampler=sampler, seed=seed)
 
+    # if is_graph:
+    #     return PyGDataLoader(dataset, sampler=sampler, batch_size=batch_size, num_workers=num_workers)
     if is_graph:
-        return PyGDataLoader(dataset, sampler=sampler, batch_size=batch_size, num_workers=num_workers)
+        return PyGDataLoader(
+            dataset,
+            sampler=sampler,
+            batch_size=batch_size,
+            num_workers=num_workers
+        )
     else:
         return DataLoader(dataset, sampler=sampler, batch_size=batch_size, num_workers=num_workers, drop_last=drop_last,
                           persistent_workers=(num_workers > 0), pin_memory=is_gpu, multiprocessing_context='fork')

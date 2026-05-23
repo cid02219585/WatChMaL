@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 
 class ReconstructionEngine(ABC):
-    def __init__(self, target_key, model, rank, device, dump_path):
+    def __init__(self, target_key, model, rank, device, dump_path, clip_grad_norm=None):
         """
         Parameters
         ==========
@@ -48,6 +48,7 @@ class ReconstructionEngine(ABC):
         self.model = model
         self.device = torch.device(device)
         self.target_key = target_key
+        self.clip_grad_norm = clip_grad_norm
 
         # Set up the parameters to save given the model type
         if isinstance(self.model, DistributedDataParallel):
@@ -149,12 +150,36 @@ class ReconstructionEngine(ABC):
                 global_metric_dict[name] = tensor.item()
         return global_metric_dict
 
+    # def process_data(self, data):
+    #     """Extract the event data from the input data dict"""
+    #     if isinstance(data['data'], (list, tuple)):
+    #         self.data = type(data['data'])(d.to(self.device) for d in data['data'])
+    #     else: 
+    #         self.data = data['data'].to(self.device)
+
+    # def process_data(self, data):
+    #     if hasattr(data, "x") and hasattr(data, "edge_index"):
+    #         self.data = data.to(self.device)
+    #     elif isinstance(data, dict) and "data" in data:
+    #         if isinstance(data["data"], (list, tuple)):
+    #             self.data = type(data["data"])(d.to(self.device) for d in data["data"])
+    #         else:
+    #             self.data = data["data"].to(self.device)
+    #     else:
+    #         raise TypeError(f"Unsupported batch type: {type(data)}")
+
     def process_data(self, data):
-        """Extract the event data from the input data dict"""
-        if isinstance(data['data'], (list, tuple)):
-            self.data = type(data['data'])(d.to(self.device) for d in data['data'])
-        else: 
-            self.data = data['data'].to(self.device)
+        if hasattr(data, "x") and hasattr(data, "edge_index"):
+            self.data = data.to(self.device)
+        elif hasattr(data, "node_types"):  # HeteroData/HeteroDataBatch
+            self.data = data.to(self.device)
+        elif isinstance(data, dict) and "data" in data:
+            if isinstance(data["data"], (list, tuple)):
+                self.data = type(data["data"])(d.to(self.device) for d in data["data"])
+            else:
+                self.data = data["data"].to(self.device)
+        else:
+            raise TypeError(f"Unsupported batch type: {type(data)}")
 
     @abstractmethod
     def process_target(self, data):
@@ -200,6 +225,8 @@ class ReconstructionEngine(ABC):
         """Backward pass using the loss computed for a mini-batch"""
         self.optimizer.zero_grad()  # reset accumulated gradient
         self.loss.backward()  # compute new gradient
+        if self.clip_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.clip_grad_norm)
         self.optimizer.step()  # step params
 
     def train(self, epochs=0, val_interval=20, num_val_batches=4, checkpointing=False, save_interval=None):
@@ -260,6 +287,7 @@ class ReconstructionEngine(ABC):
                 # run scheduler
                 if self.scheduler is not None:
                     self.scheduler.step()
+                    print(f"Epoch {self.epoch}: LR = {self.optimizer.param_groups[0]['lr']:.6f}")
                 # update the epoch and iteration
                 step += 1
                 self.iteration += 1
@@ -367,7 +395,13 @@ class ReconstructionEngine(ABC):
                     outputs = self.step(False, False)
                     metrics = {}
 
-                outputs['indices'] = data['indices'].to(self.device)
+                # outputs['indices'] = data['indices'].to(self.device)
+                if hasattr(data, "indices"):
+                    outputs["indices"] = data.indices.to(self.device)
+                elif isinstance(data, dict) and "indices" in data:
+                    outputs["indices"] = data["indices"].to(self.device)
+                else:
+                    raise AttributeError("Batch does not contain indices")
 
                 # Add the local result to the final result
                 batch_size = len(outputs["indices"])

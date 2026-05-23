@@ -1,4 +1,4 @@
-_target_: watchmal.model.gnn.GAT
+_target_: watchmal.model.gnn.GATv2
 in_feat: 8
 h_feat: 8
 num_output_channels: 4

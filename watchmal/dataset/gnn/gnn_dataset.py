@@ -15,7 +15,7 @@ from torch_cluster import knn_graph
 
 
 class GnnDataset(H5Dataset):
-    def __init__(self, h5file, geometry_file, k_neighbors, transforms=None, is_distributed=True, use_memmap=True):
+    def __init__(self, h5file, geometry_file, labels, k_neighbors, transforms=None, is_distributed=True, use_memmap=True):
         """
         Args:
             h5file              ... path to h5 dataset file
@@ -31,7 +31,7 @@ class GnnDataset(H5Dataset):
         self.geo_orientations = geo_file['orientation'].astype(np.float32)
 
         self.k_neighbors = k_neighbors
-
+        
     def __getitem__(self, item):
         super().__getitem__(item)
 

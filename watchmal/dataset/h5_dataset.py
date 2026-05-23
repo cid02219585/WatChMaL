@@ -162,7 +162,7 @@ class H5Dataset(H5CommonDataset, ABC):
         super().initialize()
         self.hit_charge = self.load_hits("hit_charge")
         
-    def __getitem__(self, item):
+    def __getitem__(self, item): # data loader will call this by event 
         data_dict = super().__getitem__(item)
 
         start = self.event_hits_index[item]

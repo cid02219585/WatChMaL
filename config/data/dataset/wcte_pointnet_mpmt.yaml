@@ -1,0 +1,3 @@
+_target_: watchmal.dataset.pointnet.pointnet_mpmt_dataset.PointNetMultiPMTDataset
+geometry_file: /vols/hyperk/WCTE/ML_2025/cds_geometry/mpmt_pos_files/WCTE_mpmt_position_correct_251125.npz
+use_orientations: False

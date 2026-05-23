@@ -1,4 +1,6 @@
-_target_: transformers.get_scheduler
+_target_: transformers.optimization.get_scheduler
 name: 'cosine' 
-num_warmup_steps: 50000
-num_training_steps: 1560000
+# num_warmup_steps: 10000
+# num_training_steps: 100210
+num_warmup_steps: 5011    # for a batch size of 512
+num_training_steps: 50110 

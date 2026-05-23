@@ -31,7 +31,7 @@ metric_functions = {
 
 class RegressionEngine(ReconstructionEngine):
     """Engine for performing training or evaluation for a regression network."""
-    def __init__(self, target_key, model, rank, device, dump_path, target_scale_offset=0, target_scale_factor=1):
+    def __init__(self, target_key, model, rank, device, dump_path, target_scale_offset=0, target_scale_factor=1, clip_grad_norm=None):
         """
         Parameters
         ==========
@@ -51,7 +51,7 @@ class RegressionEngine(ReconstructionEngine):
             Scale factor to divide target values by when calculating the loss, or dict of scale factors for each target
         """
         # create the directory for saving the log and dump files
-        super().__init__(target_key, model, rank, device, dump_path)
+        super().__init__(target_key, model, rank, device, dump_path, clip_grad_norm=clip_grad_norm)
         if isinstance(self.target_key, str):
             self.target_key = [self.target_key]
         self.target_sizes = None
@@ -67,14 +67,34 @@ class RegressionEngine(ReconstructionEngine):
         self.stacked_target = None
         self.predictions = None
 
+    # def process_target(self, data):
+    #     """Extract the event data and target from the input data dict"""
+    #     self.target_dict = {t: data[t].to(self.device) for t in self.target_key}
+    #     # First time we get data, determine the target sizes
+    #     if self.target_sizes is None:
+    #         self.target_sizes = [v.shape[-1] if len(v.shape) > 1 else 1 for v in self.target_dict.values()]
+    #     # scale and stack the targets for calculating the loss
+    #     self.stacked_target = torch.column_stack([(v - self.offset[t]) / self.scale[t] for t, v in self.target_dict.items()])
+
     def process_target(self, data):
-        """Extract the event data and target from the input data dict"""
-        self.target_dict = {t: data[t].to(self.device) for t in self.target_key}
-        # First time we get data, determine the target sizes
+        """Extract target(s) from either a dict batch or a PyG Batch/Data object."""
+        if isinstance(data, Mapping):
+            self.target_dict = {t: data[t].to(self.device) for t in self.target_key}
+        else:
+            self.target_dict = {t: getattr(data, t).to(self.device) for t in self.target_key}
+
         if self.target_sizes is None:
-            self.target_sizes = [v.shape[-1] if len(v.shape) > 1 else 1 for v in self.target_dict.values()]
-        # scale and stack the targets for calculating the loss
-        self.stacked_target = torch.column_stack([(v - self.offset[t]) / self.scale[t] for t, v in self.target_dict.items()])
+            self.target_sizes = [v.shape[-1] if len(v.shape) > 1 else 1
+                                for v in self.target_dict.values()]
+        self.stacked_target = torch.column_stack([
+            (v - self.offset[t]) / self.scale[t]
+            for t, v in self.target_dict.items()
+        ])
+
+        # for t, v in self.target_dict.items():
+        #     print(f"{t} shape: {v.shape}, first row: {v[0]}")
+
+
 
     def forward_pass(self):
         """Compute predictions for a batch of data"""
@@ -84,6 +104,14 @@ class RegressionEngine(ReconstructionEngine):
         split_model_out = torch.split(self.model_out, self.target_sizes, dim=1)
         self.predictions = {"predicted_" + t: o * self.scale[t] + self.offset[t]
                             for t, o in zip(self.target_key, split_model_out)}
+
+        # print(f"target x: {self.stacked_target[:3, 0]}")
+        # print(f"target y: {self.stacked_target[:3, 1]}")
+        # print(f"target z: {self.stacked_target[:3, 2]}")
+        # print(f"pred x:   {self.model_out[:3, 0]}")
+        # print(f"pred y:   {self.model_out[:3, 1]}")
+        # print(f"pred z:   {self.model_out[:3, 2]}")
+
         if self.target_dict is None:
             return self.predictions
         return self.target_dict | self.predictions

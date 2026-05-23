@@ -6,3 +6,4 @@ train:
   num_workers: 4
   pre_transforms:
     - random_reflections
+  is_graph: false

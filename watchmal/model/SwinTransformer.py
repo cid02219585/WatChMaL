@@ -11,6 +11,7 @@ Here is a Swin Transformer model.
 '''
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import timm
 
 
@@ -35,5 +36,6 @@ class SwinRegressor(nn.Module):
         self.output_dim = num_output_channels
 
     def forward(self, x):
+        x = F.interpolate(x, size=(112, 112), mode='bilinear', align_corners=False) # upsampling the 18 x16 double covered WCTE image -- needs to be multiple of 28
         out = self.vit(x)
         return out
