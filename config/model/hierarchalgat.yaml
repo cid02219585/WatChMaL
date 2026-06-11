@@ -1,0 +1,8 @@
+_target_: watchmal.model.gnn.HierarchicalGAT
+pmt_in: 6
+mpmt_in: 9
+h_feat: 64
+num_local_layers: 0
+num_inter_layers: 3
+heads: 2
+num_output_channels: 7

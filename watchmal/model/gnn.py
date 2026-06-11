@@ -1,3 +1,348 @@
+### hgat my attempt
+
+import torch_geometric.transforms as T
+from torch_geometric.datasets import OGB_MAG
+from torch_geometric.nn import HeteroConv, GCNConv, SAGEConv, GATConv, Linear
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# class NodeAttentionLayer(nn.Module):
+#     """
+#     Adapted from Diego999/pyGAT
+#     """
+#     def __init__(self, in_feature_dim, out_feature_dim, dropout, alpha):
+#         super(NodeAttentionLayer, self).__init__()
+#         self.in_feature_dim = in_feature_dim
+#         self.out_feature_dim = out_feature_dim
+#         self.dropout = dropout
+#         # The paper didn't specify but the author used the default 0.2 in tensorflow.
+#         self.leakyrelu = nn.LeakyReLU(alpha)
+
+#         self.weight = nn.Parameter(torch.empty(size=(self.in_feature_dim, self.out_feature_dim)))
+#         self.attention_coef = nn.Parameter(torch.empty(size=(self.out_feature_dim * 2, 1)))
+#         # Initiate with the recommended value of the leaky relu with a slope of 0.2.
+#         nn.init.xavier_uniform_(self.weight, gain=1.387)
+#         nn.init.xavier_uniform_(self.attention_coef, gain=1.387)
+
+#     def forward(self, x, adj):
+#         Wh = torch.mm(x, self.weight)      # Wh: (N, out_feature_dim)
+#         e = self._prepare_attention(Wh)    # e: (N, N) So this could be seen as an interaction matrix
+
+#         infneg_vector = -1e12 * torch.ones_like(e)
+#         attention = torch.where(adj > 0, e, infneg_vector)
+#         attention = F.softmax(attention, dim=1)
+#         attention = F.dropout(attention, self.dropout, training=self.training)
+#         h_prime = torch.matmul(attention, Wh)  # h_prime: (N, out_feature_dim)
+
+#         return F.elu(h_prime)
+
+#     def _prepare_attention(self, Wh):
+#         Wh1 = torch.matmul(Wh, self.attention_coef[:self.out_feature_dim, :])  # Wh1 & Wh2: (N, 1)
+#         Wh2 = torch.matmul(Wh, self.attention_coef[self.out_feature_dim:, :])
+#         e = Wh1 + Wh2.T  # Broadcast add
+
+#         return self.leakyrelu(e)
+
+
+# class NodeAttentionLayer(torch.nn.Module):
+#     def __init__(self, in_feat=8, h_feat=8, num_output_channels=4, heads=4):
+#         super(NodeAttentionLayer, self).__init__()
+#         torch.manual_seed(12345)
+        
+#         self.conv1 = torch_geometric.nn.GATConv(in_feat, h_feat, heads=heads)
+#         self.conv2 = torch_geometric.nn.GATConv(h_feat * heads, h_feat * 2, heads=heads)
+#         self.conv3 = torch_geometric.nn.GATConv(h_feat * 2 * heads, h_feat * 4, heads=heads)
+#         self.conv4 = torch_geometric.nn.GATConv(h_feat * 4 * heads, h_feat * 8, heads=1, concat=False)
+
+#         # Projection layers to match dims for residual addition
+#         self.res1 = torch.nn.Linear(in_feat, h_feat * heads)
+#         self.res2 = torch.nn.Linear(h_feat * heads, h_feat * 2 * heads)
+#         self.res3 = torch.nn.Linear(h_feat * 2 * heads, h_feat * 4 * heads)
+#         self.res4 = torch.nn.Linear(h_feat * 4 * heads, h_feat * 8)
+
+#         # self.lin = torch.nn.Linear(h_feat * 8, num_output_channels)
+#         # self.softplus = torch.nn.Softplus()
+
+#     def forward(self, x, edge_index):
+
+#         x = self.conv1(x, edge_index) + self.res1(x)
+#         x = F.relu(x)
+#         x = self.conv2(x, edge_index) + self.res2(x)
+#         x = F.relu(x)
+#         x = self.conv3(x, edge_index) + self.res3(x)
+#         x = F.relu(x)
+#         x = self.conv4(x, edge_index) + self.res4(x)
+
+#         # x = torch_geometric.nn.global_add_pool(x, batch)
+
+#         # x = F.dropout(x, p=0.5, training=self.training)
+#         # x = self.lin(x)
+
+#         return x
+
+# class HAN(nn.Module):
+#     def __init__(self, mpmt_feat_dim, hidden_dim, num_classes, dropout, num_heads = 1):
+#         super(HAN, self).__init__()
+#         self.dropout = dropout
+
+#         self.attentions = nn.ModuleList([
+#             NodeAttentionLayer(in_feat=mpmt_feat_dim, h_feat=hidden_dim, num_output_channels=4, heads=4) 
+#             for _ in range(num_heads)
+#         ])
+
+#         self.out_layer = nn.Linear(hidden_dim * num_heads * 2, num_classes)
+
+#     def forward(self, data):
+#         x_dict = {
+#             'pmt':  data['pmt'].x,
+#             'mpmt': data['mpmt'].x
+#         }
+
+#         # x_mpmt = data['mpmt'].x
+
+#         # edge_index_dict = {
+#         #     ('pmt',  'belongs_to', 'mpmt'): data['pmt', 'belongs_to', 'mpmt'].edge_index,
+#         #     ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+#         #     # ('mpmt', 'has_pmt',    'pmt'):  data['pmt', 'belongs_to', 'mpmt'].edge_index.flip(0),
+#         #     # ('pmt',  'neighbours', 'pmt'):  data['pmt', 'neighbours', 'pmt'].edge_index, 
+#         # }
+
+#         meta_path_list = [
+#             data['mpmt', 'contains', 'pmt'].edge_index,
+#             data['mpmt', 'neighbours', 'mpmt'].edge_index,
+#         ]
+#         path_embeddings = []
+#         for edge_index in meta_path_list:
+#             x = F.dropout(x_mpmt, self.dropout, training=self.training)
+#             Z = torch.cat([attention(x, edge_index) for attention in self.attentions], dim=1)
+#             Z = F.dropout(Z, self.dropout, training=self.training)
+#             path_embeddings.append(Z)
+
+#         final_embedding = torch.cat(path_embeddings, dim=1)
+#         out = global_add_pool(final_embedding, data['mpmt'].batch)
+#         return self.out_layer(final_embedding)
+
+from torch_geometric.nn import HeteroConv, GATConv, global_add_pool
+
+class HAN(nn.Module):
+    def __init__(self,
+        pmt_in, 
+        mpmt_in, 
+        h_feat, 
+        num_output_channels, 
+        dropout,
+        num_heads=4,
+        num_layers=3, 
+        aggr='sum',
+    ):
+        super().__init__()
+        self.dropout = dropout
+
+        self.convs = torch.nn.ModuleList([HeteroConv({
+                ('pmt', 'belongs_to', 'mpmt'): GATConv((pmt_in, mpmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+                ('mpmt', 'neighbours', 'mpmt'): GATConv(mpmt_in, h_feat, heads=num_heads, concat=False),
+                ('mpmt', 'contains', 'pmt'): GATConv((mpmt_in, pmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+            }, aggr=aggr)])
+
+        for _ in range(num_layers-1):
+            conv = HeteroConv({
+                ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+                ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
+                ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+            }, aggr=aggr)
+            self.convs.append(conv)
+
+        self.out_layer = nn.Linear(h_feat, num_output_channels)
+
+    def forward(self, data):
+        x_dict = {
+            'pmt':  data['pmt'].x,
+            'mpmt': data['mpmt'].x,
+        }
+        edge_index_dict = {
+            ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
+            ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
+            ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+        }
+
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
+                      for key, x in x_dict.items()}
+
+        out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+
+        return self.out_layer(out)
+
+### baseline
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from torch_geometric.nn import global_mean_pool
+from torch_geometric.utils import softmax
+from torch_scatter import scatter_mean
+
+class NodeEncoder(nn.Module):
+    def __init__(self, in_channels, hidden_channels):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_channels, hidden_channels),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_channels),
+            nn.Linear(hidden_channels, hidden_channels),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class LocalPMTGAT(nn.Module):
+    def __init__(self, hidden_channels, num_heads=4):
+        super().__init__()
+        assert hidden_channels % num_heads == 0
+
+        self.num_heads = num_heads
+        self.head_dim = hidden_channels // num_heads
+
+        self.q = nn.Linear(hidden_channels, hidden_channels)
+        self.k = nn.Linear(hidden_channels, hidden_channels)
+        self.v = nn.Linear(hidden_channels, hidden_channels)
+
+        self.update = nn.Sequential(
+            nn.Linear(2 * hidden_channels, hidden_channels),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_channels),
+            nn.Linear(hidden_channels, hidden_channels),
+        )
+
+    def forward(self, x, edge_index):
+        row, col = edge_index
+
+        Q = self.q(x).view(-1, self.num_heads, self.head_dim)
+        K = self.k(x).view(-1, self.num_heads, self.head_dim)
+        V = self.v(x).view(-1, self.num_heads, self.head_dim)
+
+        scores = (Q[row] * K[col]).sum(-1) / self.head_dim ** 0.5
+        attn = softmax(scores, index=row)
+
+        msg = attn.unsqueeze(-1) * V[col]
+        msg = msg.view(-1, x.size(-1))
+
+        agg = torch.zeros_like(x)
+        agg.scatter_add_(0, row.unsqueeze(-1).expand_as(msg), msg)
+
+        return self.update(torch.cat([x, agg], dim=-1)) + x
+
+class InterMPMTGAT(nn.Module):
+    def __init__(self, hidden_channels, num_heads=4):
+        super().__init__()
+        assert hidden_channels % num_heads == 0
+
+        self.num_heads = num_heads
+        self.head_dim = hidden_channels // num_heads
+
+        self.q = nn.Linear(hidden_channels, hidden_channels)
+        self.k = nn.Linear(hidden_channels, hidden_channels)
+        self.v = nn.Linear(hidden_channels, hidden_channels)
+
+        self.update = nn.Sequential(
+            nn.Linear(2 * hidden_channels, hidden_channels),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_channels),
+            nn.Linear(hidden_channels, hidden_channels),
+        )
+
+    def forward(self, x, edge_index):
+        row, col = edge_index
+
+        Q = self.q(x).view(-1, self.num_heads, self.head_dim)
+        K = self.k(x).view(-1, self.num_heads, self.head_dim)
+        V = self.v(x).view(-1, self.num_heads, self.head_dim)
+
+        scores = (Q[row] * K[col]).sum(-1) / self.head_dim ** 0.5
+        attn = softmax(scores, index=row)
+
+        msg = attn.unsqueeze(-1) * V[col]
+        msg = msg.view(-1, x.size(-1))
+
+        agg = torch.zeros_like(x)
+        agg.scatter_add_(0, row.unsqueeze(-1).expand_as(msg), msg)
+
+        return self.update(torch.cat([x, agg], dim=-1)) + x
+
+class HierarchicalGATBaseline(nn.Module):
+    def __init__(
+        self,
+        pmt_in_channels=8,
+        hidden_channels=64,
+        num_output_channels=7,
+        num_local_layers=1,
+        num_inter_layers=3,
+        num_heads_local=1,
+        num_heads_global=4,
+        dropout=0.0,
+    ):
+        super().__init__()
+
+        self.pmt_encoder = NodeEncoder(pmt_in_channels, hidden_channels)
+
+        self.local_pmt_layers = nn.ModuleList([
+            LocalPMTGAT(hidden_channels, num_heads_local)
+            for _ in range(num_local_layers)
+        ])
+
+        self.inter_layers = nn.ModuleList([
+            InterMPMTGAT(hidden_channels, num_heads_global)
+            for _ in range(num_inter_layers)
+        ])
+
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_channels, hidden_channels),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_channels),
+            nn.Linear(hidden_channels, num_output_channels),
+        )
+
+        self.drop = nn.Dropout(p=dropout)
+
+    def forward(self, data):
+        # --- unpack HeteroData
+        x            = data['pmt'].x
+        batch_mpmt   = data['mpmt'].batch
+        pmt_edges    = data['pmt',  'neighbours', 'pmt'].edge_index
+        mpmt_edges   = data['mpmt', 'neighbours', 'mpmt'].edge_index
+        belongs_to   = data['pmt',  'belongs_to', 'mpmt'].edge_index
+        # belongs_to[0] = pmt indices, belongs_to[1] = mpmt indices
+        num_mpmts    = data['mpmt'].x.size(0)
+
+        # --- encode PMTs
+        x = self.pmt_encoder(x)
+
+        # --- local intra-mPMT PMT-PMT message passing
+        for layer in self.local_pmt_layers:
+            x = layer(x, pmt_edges)
+
+        # --- aggregate PMT representations to mPMT level
+        x_mpmt = scatter_mean(
+            x,
+            belongs_to[1],
+            dim=0,
+            dim_size=num_mpmts,
+        )
+
+        # --- inter-mPMT message passing
+        for layer in self.inter_layers:
+            x_mpmt = layer(x_mpmt, mpmt_edges)
+            x_mpmt = self.drop(x_mpmt)
+
+        # --- pool to event
+        x_evt = global_mean_pool(x_mpmt, batch_mpmt)
+
+        return self.classifier(x_evt)
+
 # import sys, types
 # # Force pyg_lib to appear absent so HGTConv uses pure PyTorch fallback
 # sys.modules['pyg_lib'] = None
@@ -176,7 +521,7 @@ import torch_geometric.nn as pyg_nn
 from torch_geometric.nn import HGTConv
 
 class HGT(torch.nn.Module):
-    def __init__(self, pmt_in=6, mpmt_in=6, h_feat=64, heads=4, num_output_channels=7):
+    def __init__(self, pmt_in=6, mpmt_in=6, h_feat=64, heads=4, num_output_channels=7): #,pmt_emb_dim = 4):
         super().__init__()
 
         node_types = ['pmt', 'mpmt']
@@ -184,11 +529,14 @@ class HGT(torch.nn.Module):
             ('pmt', 'belongs_to', 'mpmt'),
             ('mpmt', 'has_pmt', 'pmt'),
             ('mpmt', 'neighbours', 'mpmt'),
+            ('pmt', 'neighbours', 'pmt'), 
         ]
         metadata = (node_types, edge_types)
+        # self.pmt_id_emb = torch.nn.Embedding(19, pmt_emb_dim)
 
         self.conv1 = HGTConv(
             in_channels={'pmt': pmt_in, 'mpmt': mpmt_in},
+            # in_channels={'pmt': pmt_in + pmt_emb_dim, 'mpmt': mpmt_in},
             out_channels=h_feat, metadata=metadata, heads=heads
         )
         self.conv2 = HGTConv(
@@ -199,10 +547,10 @@ class HGT(torch.nn.Module):
             in_channels={'pmt': h_feat, 'mpmt': h_feat},
             out_channels=h_feat, metadata=metadata, heads=heads
         )
-        self.conv4 = HGTConv(
-            in_channels={'pmt': h_feat, 'mpmt': h_feat},
-            out_channels=h_feat, metadata=metadata, heads=heads
-        )
+        # self.conv4 = HGTConv(
+        #     in_channels={'pmt': h_feat, 'mpmt': h_feat},
+        #     out_channels=h_feat, metadata=metadata, heads=heads
+        # )
 
         # BatchNorm for each conv layer, separate for each node type
         self.bn1_pmt  = torch.nn.BatchNorm1d(h_feat)
@@ -212,23 +560,37 @@ class HGT(torch.nn.Module):
         self.bn3_pmt  = torch.nn.BatchNorm1d(h_feat)
         self.bn3_mpmt = torch.nn.BatchNorm1d(h_feat)
         self.bn4_mpmt = torch.nn.BatchNorm1d(h_feat)  # conv4: only mpmt feeds into pool
-
+        self.bn4_pmt = torch.nn.BatchNorm1d(h_feat)
+        # self.mlp = torch.nn.Sequential(
+        #     torch.nn.Linear(h_feat, h_feat // 2),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Dropout(0.3),
+        #     torch.nn.Linear(h_feat // 2, num_output_channels)
+        # )
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(h_feat, h_feat // 2),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(h_feat // 2, num_output_channels)
+           torch.nn.Linear(4*h_feat, h_feat),
+           torch.nn.ReLU(),
+           torch.nn.Dropout(0.3),
+           torch.nn.Linear(h_feat, h_feat // 2),
+           torch.nn.ReLU(),
+           torch.nn.Linear(h_feat // 2, num_output_channels)
         )
-
     def forward(self, data):
         x_dict = {
             'pmt':  data['pmt'].x,
             'mpmt': data['mpmt'].x
         }
+        # pmt_id_emb = self.pmt_id_emb(data['pmt'].pmt_id.long())
+
+        # x_dict = {
+        #     'pmt':  torch.cat([data['pmt'].x, pmt_id_emb], dim=1),
+        #     'mpmt': data['mpmt'].x
+        # }
         edge_index_dict = {
             ('pmt',  'belongs_to', 'mpmt'): data['pmt', 'belongs_to', 'mpmt'].edge_index,
             ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
             ('mpmt', 'has_pmt',    'pmt'):  data['pmt', 'belongs_to', 'mpmt'].edge_index.flip(0),
+            ('pmt',  'neighbours', 'pmt'):  data['pmt', 'neighbours', 'pmt'].edge_index, 
         }
 
         x_dict = self.conv1(x_dict, edge_index_dict)
@@ -239,17 +601,183 @@ class HGT(torch.nn.Module):
         x_dict['pmt']  = F.relu(self.bn2_pmt(x_dict['pmt']))
         x_dict['mpmt'] = F.relu(self.bn2_mpmt(x_dict['mpmt']))
 
+        # old = {k: v for k, v in x_dict.items()}
+        # new = self.conv2(x_dict, edge_index_dict)
+
+        # x_dict = {
+        #     'pmt':  F.relu(self.bn2_pmt(new['pmt'] + old['pmt'])),
+        #     'mpmt': F.relu(self.bn2_mpmt(new['mpmt'] + old['mpmt'])),
+        # }
+
         x_dict = self.conv3(x_dict, edge_index_dict)
         x_dict['pmt']  = F.relu(self.bn3_pmt(x_dict['pmt']))
         x_dict['mpmt'] = F.relu(self.bn3_mpmt(x_dict['mpmt']))
 
-        x_dict = self.conv4(x_dict, edge_index_dict)
-        x_dict['mpmt'] = F.relu(self.bn4_mpmt(x_dict['mpmt']))
-        # pmt not normalised after conv4 since it doesn't feed into the pool
+        # old = {k: v for k, v in x_dict.items()}
+        # new = self.conv3(x_dict, edge_index_dict)
 
-        x = pyg_nn.global_mean_pool(x_dict['mpmt'], data['mpmt'].batch)
+        # x_dict = {
+        #     'pmt':  F.relu(self.bn3_pmt(new['pmt'] + old['pmt'])),
+        #     'mpmt': F.relu(self.bn3_mpmt(new['mpmt'] + old['mpmt'])),
+        # }
+
+        # x_dict = self.conv4(x_dict, edge_index_dict)
+        # x_dict['mpmt'] = F.relu(self.bn4_mpmt(x_dict['mpmt']))
+        # x_dict['pmt']  = F.relu(self.bn4_pmt(x_dict['pmt']))
+
+        #pmt not normalised after conv4 since it doesn't feed into the pool
+
+        # old = {k: v for k, v in x_dict.items()}
+        # new = self.conv4(x_dict, edge_index_dict)
+
+        # x_dict = {
+        #     'pmt': new['pmt'],  # not used in current pooling
+        #     'mpmt': F.relu(self.bn4_mpmt(new['mpmt'] + old['mpmt'])),
+        # }
+
+        # x = pyg_nn.global_mean_pool(x_dict['mpmt'], data['mpmt'].batch)
+
+        pmt_pool = torch.cat([
+            pyg_nn.global_mean_pool(x_dict['pmt'], data['pmt'].batch),
+            pyg_nn.global_add_pool(x_dict['pmt'], data['pmt'].batch),
+        ], dim=1)
+
+        mpmt_pool = torch.cat([
+            pyg_nn.global_mean_pool(x_dict['mpmt'], data['mpmt'].batch),
+            pyg_nn.global_add_pool(x_dict['mpmt'], data['mpmt'].batch),
+        ], dim=1)
+
+        x = torch.cat([pmt_pool, mpmt_pool], dim=1)
+
+        # pmt_pool = pyg_nn.global_mean_pool(x_dict['pmt'], data['pmt'].batch)
+        # mpmt_pool = pyg_nn.global_mean_pool(x_dict['mpmt'], data['mpmt'].batch)
+        # x = torch.cat([pmt_pool,mpmt_pool],dim=1)
 
         return self.mlp(x)
+
+# class HGT(torch.nn.Module):
+#     def __init__(self, pmt_in=6, mpmt_in=6, h_feat=64, heads=4, num_output_channels=7):
+#         super().__init__()
+
+#         node_types = ['pmt', 'mpmt']
+#         edge_types = [
+#             ('pmt', 'belongs_to', 'mpmt'),
+#             ('mpmt', 'has_pmt', 'pmt'),
+#             ('mpmt', 'neighbours', 'mpmt'),
+#         ]
+#         metadata = (node_types, edge_types)
+
+#         # self.res_proj_pmt = torch.nn.Linear(pmt_in, h_feat)
+#         # self.res_proj_mpmt = torch.nn.Linear(mpmt_in, h_feat)
+
+#         self.conv1 = HGTConv(
+#             in_channels={'pmt': pmt_in, 'mpmt': mpmt_in},
+#             out_channels=h_feat, metadata=metadata, heads=heads
+#         )
+#         self.conv2 = HGTConv(
+#             in_channels={'pmt': h_feat, 'mpmt': h_feat},
+#             out_channels=h_feat, metadata=metadata, heads=heads
+#         )
+#         self.conv3 = HGTConv(
+#             in_channels={'pmt': h_feat, 'mpmt': h_feat},
+#             out_channels=h_feat, metadata=metadata, heads=heads
+#         )
+#         self.conv4 = HGTConv(
+#             in_channels={'pmt': h_feat, 'mpmt': h_feat},
+#             out_channels=h_feat, metadata=metadata, heads=heads
+#         )
+
+#         # BatchNorm for each conv layer, separate for each node type
+#         self.bn1_pmt  = torch.nn.BatchNorm1d(h_feat)
+#         self.bn1_mpmt = torch.nn.BatchNorm1d(h_feat)
+#         self.bn2_pmt  = torch.nn.BatchNorm1d(h_feat)
+#         self.bn2_mpmt = torch.nn.BatchNorm1d(h_feat)
+#         self.bn3_pmt  = torch.nn.BatchNorm1d(h_feat)
+#         self.bn3_mpmt = torch.nn.BatchNorm1d(h_feat)
+#         self.bn4_mpmt = torch.nn.BatchNorm1d(h_feat)  # conv4: only mpmt feeds into pool
+
+#         self.mlp = torch.nn.Sequential(
+#             torch.nn.Linear(h_feat, h_feat // 2),
+#             torch.nn.ReLU(),
+#             torch.nn.Dropout(0.3),
+#             torch.nn.Linear(h_feat // 2, num_output_channels)
+#         )
+
+#         # self.mlp = torch.nn.Sequential(
+#         #     torch.nn.Linear(h_feat, h_feat),
+#         #     torch.nn.ReLU(),
+#         #     torch.nn.Dropout(0.2),
+#         #     torch.nn.Linear(h_feat, h_feat // 2),
+#         #     torch.nn.ReLU(),
+#         #     torch.nn.Linear(h_feat // 2, num_output_channels)
+#         # )
+
+#     def forward(self, data):
+#         x_dict = {
+#             'pmt':  data['pmt'].x,
+#             'mpmt': data['mpmt'].x
+#         }
+#         edge_index_dict = {
+#             ('pmt',  'belongs_to', 'mpmt'): data['pmt', 'belongs_to', 'mpmt'].edge_index,
+#             ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+#             ('mpmt', 'has_pmt',    'pmt'):  data['pmt', 'belongs_to', 'mpmt'].edge_index.flip(0),
+#         }
+
+#         x_dict = self.conv1(x_dict, edge_index_dict)
+#         x_dict['pmt']  = F.relu(self.bn1_pmt(x_dict['pmt']))
+#         x_dict['mpmt'] = F.relu(self.bn1_mpmt(x_dict['mpmt']))
+
+#         # res_dict = {
+#         #     'pmt': self.res_proj_pmt(x_dict['pmt']),
+#         #     'mpmt': self.res_proj_mpmt(x_dict['mpmt'])
+#         # }
+
+#         # out_dict = self.conv1(x_dict, edge_index_dict)
+
+#         # x_dict = {
+#         #     'pmt':  F.relu(self.bn1_pmt(out_dict['pmt'] + res_dict['pmt'])),
+#         #     'mpmt': F.relu(self.bn1_mpmt(out_dict['mpmt'] + res_dict['mpmt']))
+#         # }
+
+#         x_dict = self.conv2(x_dict, edge_index_dict)
+#         x_dict['pmt']  = F.relu(self.bn2_pmt(x_dict['pmt']))
+#         x_dict['mpmt'] = F.relu(self.bn2_mpmt(x_dict['mpmt']))
+
+#         # res_dict = x_dict
+#         # out_dict = self.conv2(x_dict, edge_index_dict)
+
+#         # x_dict = {
+#         #     'pmt':  F.relu(self.bn2_pmt(out_dict['pmt'] + res_dict['pmt'])),
+#         #     'mpmt': F.relu(self.bn2_mpmt(out_dict['mpmt'] + res_dict['mpmt']))
+#         # }
+
+#         x_dict = self.conv3(x_dict, edge_index_dict)
+#         x_dict['pmt']  = F.relu(self.bn3_pmt(x_dict['pmt']))
+#         x_dict['mpmt'] = F.relu(self.bn3_mpmt(x_dict['mpmt']))
+
+#         # res_dict = x_dict
+#         # out_dict = self.conv3(x_dict, edge_index_dict)
+
+#         # x_dict = {
+#         #     'pmt':  F.relu(self.bn3_pmt(out_dict['pmt'] + res_dict['pmt'])),
+#         #     'mpmt': F.relu(self.bn3_mpmt(out_dict['mpmt'] + res_dict['mpmt']))
+#         # }
+
+#         x_dict = self.conv4(x_dict, edge_index_dict)
+#         x_dict['mpmt'] = F.relu(self.bn4_mpmt(x_dict['mpmt']))
+#         # pmt not normalised after conv4 since it doesn't feed into the pool
+
+#         # res_dict = x_dict
+#         # out_dict = self.conv4(x_dict, edge_index_dict)
+
+#         # x_dict = {
+#         #     'pmt': res_dict['pmt'],  # not needed after this, so just keep it unchanged
+#         #     'mpmt': F.relu(self.bn4_mpmt(out_dict['mpmt'] + res_dict['mpmt']))
+#         # }
+
+#         x = pyg_nn.global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+
+#         return self.mlp(x)
 
 class GATv2Edge(torch.nn.Module):
     def __init__(self, in_feat=8, h_feat=8, num_output_channels=4, heads=4):
@@ -300,6 +828,92 @@ class GATv2Edge(torch.nn.Module):
         # ], dim=1)
 
         return x
+
+import torch
+import torch.nn.functional as F
+import torch_geometric.nn as pyg_nn
+from torch_geometric.nn import HGTConv
+
+
+class HGTMPMTOnly(torch.nn.Module):
+    def __init__(self, mpmt_in=41, h_feat=64, heads=4, num_output_channels=7):
+        super().__init__()
+
+        node_types = ["mpmt"]
+        edge_types = [
+            ("mpmt", "neighbours", "mpmt"),
+        ]
+        metadata = (node_types, edge_types)
+
+        self.conv1 = HGTConv(
+            in_channels={"mpmt": mpmt_in},
+            out_channels=h_feat,
+            metadata=metadata,
+            heads=heads,
+        )
+        self.conv2 = HGTConv(
+            in_channels={"mpmt": h_feat},
+            out_channels=h_feat,
+            metadata=metadata,
+            heads=heads,
+        )
+        self.conv3 = HGTConv(
+            in_channels={"mpmt": h_feat},
+            out_channels=h_feat,
+            metadata=metadata,
+            heads=heads,
+        )
+        self.conv4 = HGTConv(
+            in_channels={"mpmt": h_feat},
+            out_channels=h_feat,
+            metadata=metadata,
+            heads=heads,
+        )
+
+        self.bn1 = torch.nn.BatchNorm1d(h_feat)
+        self.bn2 = torch.nn.BatchNorm1d(h_feat)
+        self.bn3 = torch.nn.BatchNorm1d(h_feat)
+        self.bn4 = torch.nn.BatchNorm1d(h_feat)
+
+        # mean + add + max pooling
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(3 * h_feat, h_feat),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.3),
+            torch.nn.Linear(h_feat, num_output_channels),
+        )
+
+    def forward(self, data):
+        x_dict = {
+            "mpmt": data["mpmt"].x,
+        }
+
+        edge_index_dict = {
+            ("mpmt", "neighbours", "mpmt"): data["mpmt", "neighbours", "mpmt"].edge_index,
+        }
+
+        x_dict = self.conv1(x_dict, edge_index_dict)
+        x_dict["mpmt"] = F.relu(self.bn1(x_dict["mpmt"]))
+
+        old = x_dict["mpmt"]
+        x_dict = self.conv2(x_dict, edge_index_dict)
+        x_dict["mpmt"] = F.relu(self.bn2(x_dict["mpmt"] + old))
+
+        old = x_dict["mpmt"]
+        x_dict = self.conv3(x_dict, edge_index_dict)
+        x_dict["mpmt"] = F.relu(self.bn3(x_dict["mpmt"] + old))
+
+        old = x_dict["mpmt"]
+        x_dict = self.conv4(x_dict, edge_index_dict)
+        x_dict["mpmt"] = F.relu(self.bn4(x_dict["mpmt"] + old))
+
+        x = torch.cat([
+            pyg_nn.global_mean_pool(x_dict["mpmt"], data["mpmt"].batch),
+            pyg_nn.global_add_pool(x_dict["mpmt"], data["mpmt"].batch),
+            pyg_nn.global_max_pool(x_dict["mpmt"], data["mpmt"].batch),
+        ], dim=1)
+
+        return self.mlp(x)
 
 class GATEdge(torch.nn.Module):
     def __init__(self, in_feat=8, h_feat=8, num_output_channels=4, heads=4):

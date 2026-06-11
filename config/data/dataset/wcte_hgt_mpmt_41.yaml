@@ -1,0 +1,4 @@
+_target_: watchmal.dataset.gnn.gnn_mpmt_dataset_heterogen.GNNMultiPMT41HeteroDataset
+geometry_file: /vols/hyperk/WCTE/ML_2025/cds_geometry/mpmt_pos_files/WCTE_mpmt_position_correct_251125.npz
+use_orientations: False
+k_neighbors: 10

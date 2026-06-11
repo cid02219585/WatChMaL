@@ -1,0 +1,9 @@
+_target_: watchmal.model.gnn.HierarchicalGATBaseline
+pmt_in_channels: 8
+hidden_channels: 64
+num_output_channels: 7
+num_local_layers: 1
+num_inter_layers: 3
+num_heads_local: 1
+num_heads_global: 4
+dropout: 0.0

@@ -1,0 +1,6 @@
+_target_: watchmal.model.gnn.HGTMPMTOnly
+mpmt_in: 9
+h_feat: 64
+heads: 4
+num_output_channels: 7
+
