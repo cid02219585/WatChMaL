@@ -1,4 +1,256 @@
- ## han
+# can add things like layer norm in after
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+ 
+from torch_geometric.nn import TransformerConv, HeteroConv, GATConv, GATv2Conv, global_add_pool
+
+class NonHierGAT(nn.Module):
+    def __init__(self,
+        pmt_in, 
+        mpmt_in, 
+        h_feat, 
+        num_output_channels, 
+        dropout,
+        num_heads=4,
+        num_layers=3, 
+        aggr='sum',
+    ):
+        super().__init__()
+        self.dropout = dropout
+
+        self.pmt_encoder = nn.Linear(pmt_in, h_feat)
+        self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+
+        self.convs = torch.nn.ModuleList([])
+
+        for _ in range(num_layers):
+            conv = HeteroConv({
+                ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+                ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
+                ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+                ('pmt', 'neighbours', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False),
+            }, aggr=aggr)
+            
+            self.convs.append(conv)
+
+        self.out_layer = nn.Sequential( # single layer can only produce a linear mapping to output 
+            nn.Linear(h_feat, h_feat),
+            nn.ReLU(),
+            nn.Linear(h_feat, num_output_channels),
+        )
+
+    def forward(self, data):
+        x_dict = {
+            'pmt':  self.pmt_encoder(data['pmt'].x),
+            'mpmt': self.mpmt_encoder(data['mpmt'].x),
+        }
+        edge_index_dict = {
+            ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
+            ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
+            ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+            ('pmt', 'neighbours', 'pmt'): data['pmt', 'neighbours', 'pmt'].edge_index,
+        }
+
+
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
+                      for key, x in x_dict.items()}
+
+        out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+
+        return self.out_layer(out)
+
+
+class HierGAT(nn.Module):
+    def __init__(self, pmt_in, mpmt_in, h_feat, num_output_channels,
+                 num_pmt_layers=1, num_mpmt_layers=3, num_heads=4, dropout=0.0):
+        super().__init__()
+        self.dropout = dropout
+
+        self.pmt_encoder  = nn.Linear(pmt_in,  h_feat)
+        self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+
+        self.pmt_layers = nn.ModuleList([
+            GATConv(h_feat, h_feat, heads=num_heads, concat=False)
+            for _ in range(num_pmt_layers)
+        ])
+
+        self.pool_conv = GATConv((h_feat, h_feat), h_feat, heads=num_heads,
+                                 concat=False, add_self_loops=False)
+
+        self.mpmt_layers = nn.ModuleList([
+            GATConv(h_feat, h_feat, heads=num_heads, concat=False)
+            for _ in range(num_mpmt_layers)
+        ])
+
+        self.out_layer = nn.Sequential(
+            nn.Linear(h_feat, h_feat),
+            nn.ReLU(),
+            nn.Linear(h_feat, num_output_channels),
+        )
+
+    def forward(self, data):
+        x_p = self.pmt_encoder(data['pmt'].x)
+        x_m = self.mpmt_encoder(data['mpmt'].x)
+
+        pmt_edges  = data['pmt',  'neighbours', 'pmt'].edge_index
+        belongs_to = data['pmt',  'belongs_to', 'mpmt'].edge_index
+        mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
+
+        # stage 1: local intra-mPMT
+        for conv in self.pmt_layers:
+            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training)
+
+        # stage 2: attention-pooled hand-off (mpmt features are the queries)
+        x_m = F.dropout(F.relu(self.pool_conv(
+            (x_p, x_m), belongs_to,
+            size=(x_p.size(0), x_m.size(0)),
+        )),p=self.dropout, training=self.training)
+
+        # stage 3: global inter-mPMT
+        for conv in self.mpmt_layers:
+            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training)
+
+        out = global_add_pool(x_m, data['mpmt'].batch)
+        return self.out_layer(out)
+
+
+class NonHierTrans(nn.Module):
+    def __init__(self,
+        pmt_in, 
+        mpmt_in, 
+        h_feat, 
+        num_output_channels, 
+        dropout,
+        num_heads=4,
+        num_layers=3, 
+        aggr='sum',
+    ):
+        super().__init__()
+        self.dropout = dropout
+
+        self.pmt_encoder = nn.Linear(pmt_in, h_feat)
+        self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+
+        self.convs = torch.nn.ModuleList([])
+
+        for _ in range(num_layers):
+            conv = HeteroConv({
+                ('pmt', 'belongs_to', 'mpmt'): TransformerConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False),
+                ('mpmt', 'neighbours', 'mpmt'): TransformerConv(h_feat, h_feat, heads=num_heads, concat=False),
+                ('mpmt', 'contains', 'pmt'): TransformerConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False),
+                ('pmt', 'neighbours', 'pmt'): TransformerConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False),
+            }, aggr=aggr)
+            
+            self.convs.append(conv)
+
+        self.out_layer = nn.Sequential( # single layer can only produce a linear mapping to output 
+            nn.Linear(h_feat, h_feat),
+            nn.ReLU(),
+            nn.Linear(h_feat, num_output_channels),
+        )
+
+    def forward(self, data):
+        x_dict = {
+            'pmt':  self.pmt_encoder(data['pmt'].x),
+            'mpmt': self.mpmt_encoder(data['mpmt'].x),
+        }
+        edge_index_dict = {
+            ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
+            ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
+            ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+            ('pmt', 'neighbours', 'pmt'): data['pmt', 'neighbours', 'pmt'].edge_index,
+        }
+
+
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
+                      for key, x in x_dict.items()}
+
+        out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+
+        return self.out_layer(out)
+
+
+class HierTrans(nn.Module):
+    def __init__(self, pmt_in, mpmt_in, h_feat, num_output_channels,
+                 num_pmt_layers=1, num_mpmt_layers=3, num_heads=4, dropout=0.0):
+        super().__init__()
+        self.dropout = dropout
+
+        self.pmt_encoder  = nn.Linear(pmt_in,  h_feat)
+        self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+
+        self.pmt_layers = nn.ModuleList([
+            TransformerConv(h_feat, h_feat, heads=num_heads, concat=False)
+            for _ in range(num_pmt_layers)
+        ])
+
+        self.pool_conv = TransformerConv((h_feat, h_feat), h_feat, heads=num_heads,
+                                 concat=False)
+
+        self.mpmt_layers = nn.ModuleList([
+            TransformerConv(h_feat, h_feat, heads=num_heads, concat=False)
+            for _ in range(num_mpmt_layers)
+        ])
+
+        self.out_layer = nn.Sequential(
+            nn.Linear(h_feat, h_feat),
+            nn.ReLU(),
+            nn.Linear(h_feat, num_output_channels),
+        )
+
+    def forward(self, data):
+        x_p = self.pmt_encoder(data['pmt'].x)
+        x_m = self.mpmt_encoder(data['mpmt'].x)
+
+        pmt_edges  = data['pmt',  'neighbours', 'pmt'].edge_index
+        belongs_to = data['pmt',  'belongs_to', 'mpmt'].edge_index
+        mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
+
+        for conv in self.pmt_layers:
+            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training)
+
+        x_m = F.dropout(F.relu(self.pool_conv(
+            (x_p, x_m), belongs_to,
+        )),p=self.dropout, training=self.training)
+
+        for conv in self.mpmt_layers:
+            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training)
+
+        out = global_add_pool(x_m, data['mpmt'].batch)
+        return self.out_layer(out)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## han
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

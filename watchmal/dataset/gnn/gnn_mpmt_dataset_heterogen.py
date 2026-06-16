@@ -8,6 +8,8 @@ import torch_geometric.data as PyGData
 import h5py
 from torch_cluster import knn_graph
 
+# from watchmal.model import build_same_mpmt_edges
+
 from torch_geometric.data import HeteroData
 
 barrel_map_array_idxs = np.array([6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 15, 16, 17, 12, 13, 14, 18], dtype=np.int16)
@@ -110,6 +112,9 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         )
         mpmt_to_pmt = pmt_to_mpmt.flip(0)
 
+        # same_mpmt = build_same_mpmt_edges(pmt_to_mpmt, n_mpmts)
+        # hetero_data['pmt', 'same_mpmt', 'pmt'].edge_index = same_mpmt
+
         # mPMT -> mPMT: k-NN on mPMT positions
         mpmt_pos_tensor = torch.tensor(mpmt_pos / 100., dtype=torch.float32)
         mpmt_to_mpmt = knn_graph(mpmt_pos_tensor, k=min(self.k_neighbors, n_mpmts - 1)).long()
@@ -184,109 +189,3 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         
         # print(f"positions shape: {hetero_data['positions'].shape}, values: {hetero_data['positions']}")
         return hetero_data
-
-# import numpy as np
-# import torch
-# from torch_cluster import knn_graph
-# from torch_geometric.data import HeteroData
-
-# from watchmal.dataset.h5_dataset import H5Dataset
-
-# barrel_map_array_idxs = np.array(
-#     [6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 15, 16, 17, 12, 13, 14, 18],
-#     dtype=np.int16
-# )
-# pmts_per_mpmt = 19
-
-
-# class GNNMultiPMT41HeteroDataset(H5Dataset):
-#     """
-#     HGT diagnostic dataset:
-#     - one node type: mpmt
-#     - node features copied from GAT style:
-#         [x, y, z, 19 charge channels, 19 time channels]
-#     - total feature dim = 41
-#     """
-
-#     def __init__(
-#         self,
-#         h5file,
-#         geometry_file,
-#         k_neighbors,
-#         use_orientations=False,
-#         transforms=None,
-#         is_distributed=True,
-#         max_points=None,
-#         use_memmap=True,
-#     ):
-#         super().__init__(h5file, use_memmap)
-
-#         geo_file = np.load(geometry_file, "r")
-#         geo_positions = torch.from_numpy(geo_file["position"]).float()
-
-#         # central/reference PMT of each mPMT
-#         self.mpmt_positions = geo_positions[18::19, :].T  # shape (3, n_mpmts)
-
-#         mpmt_y = np.abs(self.mpmt_positions[1, :])
-#         self.barrel_mpmts = np.where(mpmt_y < mpmt_y.max() - 10)[0].astype(np.int16)
-
-#         self.k_neighbors = k_neighbors
-#         self.max_points = max_points
-
-#     def __getitem__(self, item):
-#         data_dict = super().__getitem__(item)
-
-#         hit_mpmts = self.event_hit_pmts // pmts_per_mpmt
-#         hit_pmt_in_modules = self.event_hit_pmts % pmts_per_mpmt
-
-#         # same barrel remapping as GAT dataset
-#         hit_barrel = np.where(np.in1d(hit_mpmts, self.barrel_mpmts))[0]
-#         hit_pmt_in_modules[hit_barrel] = barrel_map_array_idxs[hit_pmt_in_modules[hit_barrel]]
-
-#         # hit-only mPMT graph, same spirit as your best GAT
-#         unique_mpmts, inverse_indices = np.unique(hit_mpmts, return_inverse=True)
-#         n_mpmts = len(unique_mpmts)
-
-#         # 41D mPMT features:
-#         # 0:3 = xyz
-#         # 3:22 = charge channels
-#         # 22:41 = time channels
-#         x_np = np.zeros((41, n_mpmts), dtype=np.float32)
-
-#         x_np[:3, :] = self.mpmt_positions[:, unique_mpmts]
-
-#         charge_channels = hit_pmt_in_modules + 3
-#         time_channels = hit_pmt_in_modules + 22
-
-#         x_np[charge_channels, inverse_indices] = self.event_hit_charges
-#         x_np[time_channels, inverse_indices] = self.event_hit_times
-
-#         x_np = x_np.T  # (n_mpmts, 41)
-
-#         scale = np.ones(41, dtype=np.float32)
-#         scale[:3] = 100.0
-#         scale[3:22] = 1.0
-#         scale[22:41] = 1000.0
-#         x_np /= scale
-
-#         x = torch.tensor(x_np, dtype=torch.float32)
-
-#         edge_index = knn_graph(
-#             x[:, :3],
-#             k=min(self.k_neighbors, n_mpmts - 1)
-#         ).long()
-
-#         hetero_data = HeteroData()
-#         hetero_data["mpmt"].x = x
-#         hetero_data["mpmt", "neighbours", "mpmt"].edge_index = edge_index
-
-#         for key in ["positions", "directions", "energies", "angles"]:
-#             if key in data_dict:
-#                 val = torch.tensor(data_dict[key], dtype=torch.float32)
-#                 if val.dim() == 1:
-#                     val = val.unsqueeze(0)
-#                 hetero_data[key] = val
-
-#         hetero_data["indices"] = torch.tensor([item], dtype=torch.long)
-
-#         return hetero_data
