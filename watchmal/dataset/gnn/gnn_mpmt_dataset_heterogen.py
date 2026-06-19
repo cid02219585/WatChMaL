@@ -126,44 +126,44 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         mpmt_edge_attr = torch.cat([delta, dist], dim=1)  # (E, 4)
 
 
-        pmt_pos_tensor = torch.tensor(global_pos, dtype=torch.float32)
+        # pmt_pos_tensor = torch.tensor(global_pos, dtype=torch.float32)
 
-        if n_hits_total > 1:
-            pmt_to_pmt = knn_graph(
-                pmt_pos_tensor,
-                k=min(3, n_hits_total - 1)
-            ).long()
-        else:
-            pmt_to_pmt = torch.empty((2, 0), dtype=torch.long)
-
-        # PMT -> PMT: connect hit PMTs inside the same mPMT
-        # pmt_edges = []
-
-        # for mpmt_local_idx in range(n_mpmts):
-        #     # indices of hit PMT nodes belonging to this local mPMT
-        #     hit_idxs = np.where(inverse_indices == mpmt_local_idx)[0]
-
-        #     # no PMT-PMT edges possible if only one hit PMT in this mPMT
-        #     if len(hit_idxs) <= 1:
-        #         continue
-
-        #     # local PMT positions within this mPMT
-        #     pos = torch.tensor(local_pos[hit_idxs], dtype=torch.float32)
-
-        #     # connect each hit PMT to nearest neighbours inside the same mPMT
-        #     k_pmt = min(3, len(hit_idxs) - 1)
-
-        #     local_edge_index = knn_graph(pos, k=k_pmt).long()
-
-        #     # remap local indices back to global hit-PMT node indices
-        #     global_edge_index = torch.tensor(hit_idxs, dtype=torch.long)[local_edge_index]
-
-        #     pmt_edges.append(global_edge_index)
-
-        # if len(pmt_edges) > 0:
-        #     pmt_to_pmt = torch.cat(pmt_edges, dim=1)
+        # if n_hits_total > 1:
+        #     pmt_to_pmt = knn_graph(
+        #         pmt_pos_tensor,
+        #         k=min(3, n_hits_total - 1)
+        #     ).long()
         # else:
         #     pmt_to_pmt = torch.empty((2, 0), dtype=torch.long)
+
+        # PMT -> PMT: connect hit PMTs inside the same mPMT
+        pmt_edges = []
+
+        for mpmt_local_idx in range(n_mpmts):
+            # indices of hit PMT nodes belonging to this local mPMT
+            hit_idxs = np.where(inverse_indices == mpmt_local_idx)[0]
+
+            # no PMT-PMT edges possible if only one hit PMT in this mPMT
+            if len(hit_idxs) <= 1:
+                continue
+
+            # local PMT positions within this mPMT
+            pos = torch.tensor(local_pos[hit_idxs], dtype=torch.float32)
+
+            # connect each hit PMT to nearest neighbours inside the same mPMT
+            k_pmt = min(3, len(hit_idxs) - 1)
+
+            local_edge_index = knn_graph(pos, k=k_pmt).long()
+
+            # remap local indices back to global hit-PMT node indices
+            global_edge_index = torch.tensor(hit_idxs, dtype=torch.long)[local_edge_index]
+
+            pmt_edges.append(global_edge_index)
+
+        if len(pmt_edges) > 0:
+            pmt_to_pmt = torch.cat(pmt_edges, dim=1)
+        else:
+            pmt_to_pmt = torch.empty((2, 0), dtype=torch.long)
 
         hetero_data = HeteroData()
 
