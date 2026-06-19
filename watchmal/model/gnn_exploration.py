@@ -224,6 +224,8 @@ class HierTrans(nn.Module):
         self.pmt_encoder  = NodeEncoder(pmt_in,  h_feat)
         self.mpmt_encoder = NodeEncoder(mpmt_in, h_feat)
 
+        print('Node enc')
+
         self.pmt_layers = nn.ModuleList([
             TransformerConv(h_feat, h_feat, heads=num_heads, concat=False)
             for _ in range(num_pmt_layers)
