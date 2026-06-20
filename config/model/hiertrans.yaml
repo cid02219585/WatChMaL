@@ -1,6 +1,7 @@
 _target_: watchmal.model.gnn_exploration.HierTrans
 pmt_in: 8
 mpmt_in: 6
+virtual_in: 4
 h_feat: 64
 num_output_channels: 7
 num_heads: 4

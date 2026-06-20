@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
  
-from torch_geometric.nn import TransformerConv, HeteroConv, GATConv, GATv2Conv, global_add_pool
+from torch_geometric.nn import TransformerConv, HeteroConv, GATConv, GATv2Conv, global_add_pool, global_mean_pool
 
 from torch_scatter import scatter_mean
 
@@ -25,6 +25,7 @@ class NonHierGAT(nn.Module):
     def __init__(self,
         pmt_in, 
         mpmt_in, 
+        virtual_in, 
         h_feat, 
         num_output_channels, 
         dropout,
@@ -35,11 +36,12 @@ class NonHierGAT(nn.Module):
         super().__init__()
         self.dropout = dropout
 
-        # self.pmt_encoder = nn.Linear(pmt_in, h_feat)
-        # self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+        self.pmt_encoder = nn.Linear(pmt_in, h_feat)
+        self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+        self.virtual_encoder = nn.Linear(virtual_in, h_feat)
 
-        self.pmt_encoder = NodeEncoder(pmt_in, h_feat)
-        self.mpmt_encoder = NodeEncoder(mpmt_in, h_feat)
+        # self.pmt_encoder = NodeEncoder(pmt_in, h_feat)
+        # self.mpmt_encoder = NodeEncoder(mpmt_in, h_feat)
 
         self.convs = torch.nn.ModuleList([])
 
@@ -48,7 +50,9 @@ class NonHierGAT(nn.Module):
                 ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
                 ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
                 ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-                ('pmt', 'neighbours', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False),
+                ('pmt', 'neighbours', 'pmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
+                ('mpmt', 'reports_to', 'virtual_node'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+                ('virtual_node', 'attends_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
             }, aggr=aggr)
             
             self.convs.append(conv)
@@ -63,14 +67,16 @@ class NonHierGAT(nn.Module):
         x_dict = {
             'pmt':  self.pmt_encoder(data['pmt'].x),
             'mpmt': self.mpmt_encoder(data['mpmt'].x),
+            'virtual_node': self.virtual_encoder(data['virtual_node'].x),
         }
         edge_index_dict = {
             ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
             ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
             ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
             ('pmt', 'neighbours', 'pmt'): data['pmt', 'neighbours', 'pmt'].edge_index,
+            ('mpmt', 'reports_to', 'virtual_node'): data['mpmt', 'reports_to', 'virtual_node'].edge_index,
+            ('virtual_node', 'attends_to', 'mpmt'): data['virtual_node', 'attends_to', 'mpmt'].edge_index,
         }
-
 
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
@@ -213,18 +219,20 @@ class NonHierTrans(nn.Module):
 
 
 class HierTrans(nn.Module):
-    def __init__(self, pmt_in, mpmt_in, h_feat, num_output_channels,
+    def __init__(self, pmt_in, mpmt_in, virtual_in, h_feat, num_output_channels,
                  num_pmt_layers=1, num_mpmt_layers=3, num_heads=4, dropout=0.0):
         super().__init__()
         self.dropout = dropout
 
-        # self.pmt_encoder  = nn.Linear(pmt_in,  h_feat)
-        # self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+        self.pmt_encoder  = nn.Linear(pmt_in,  h_feat)
+        self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+        self.virtual_encoder = nn.Linear(virtual_in, h_feat)
 
-        self.pmt_encoder  = NodeEncoder(pmt_in,  h_feat)
-        self.mpmt_encoder = NodeEncoder(mpmt_in, h_feat)
+        # self.pmt_encoder  = NodeEncoder(pmt_in,  h_feat)
+        # self.mpmt_encoder = NodeEncoder(mpmt_in, h_feat)
+        # self.pmt_encoder_norm = nn.LayerNorm(h_feat)
 
-        print('Node enc')
+        # print('Node enc')
 
         self.pmt_layers = nn.ModuleList([
             TransformerConv(h_feat, h_feat, heads=num_heads, concat=False)
@@ -240,6 +248,9 @@ class HierTrans(nn.Module):
             for _ in range(num_mpmt_layers)
         ])
 
+        # self.reports_to_conv = TransformerConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False)
+        # self.attends_to_conv = TransformerConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False)
+
         self.out_layer = nn.Sequential(
             nn.Linear(h_feat, h_feat),
             nn.ReLU(),
@@ -248,11 +259,16 @@ class HierTrans(nn.Module):
 
     def forward(self, data):
         x_p = self.pmt_encoder(data['pmt'].x)
+        x_v = self.virtual_encoder(data['virtual_node'].x)
         # x_m = self.mpmt_encoder(data['mpmt'].x)
+
+        # x_p = self.pmt_encoder_norm(self.pmt_encoder(data['pmt'].x))
 
         pmt_edges  = data['pmt',  'neighbours', 'pmt'].edge_index
         belongs_to = data['pmt',  'belongs_to', 'mpmt'].edge_index
         mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
+        # reports_to = data['mpmt', 'reports_to', 'virtual_node'].edge_index
+        # attends_to = data['virtual_node', 'attends_to', 'mpmt'].edge_index
 
         for conv in self.pmt_layers:
             x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training)
@@ -270,10 +286,19 @@ class HierTrans(nn.Module):
 
         # x_m = F.relu(self.pool_proj(torch.cat([x_m, x_m_frompmt], dim=-1)))
 
+        # Broadcast to each mPMT using batch index
+        x_m = x_m + x_v[data['mpmt'].batch]
+
+        # x_m = x_m + self.attends_to_conv((x_v, x_m), attends_to)
+
         for conv in self.mpmt_layers:
             x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training)
 
+        # x_v = self.reports_to_conv((x_m, x_v), reports_to)
+        # x_m = x_m + self.attends_to_conv((x_v, x_m), attends_to)
+
         out = global_add_pool(x_m, data['mpmt'].batch)
+
         return self.out_layer(out)
 
 

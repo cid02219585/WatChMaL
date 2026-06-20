@@ -185,6 +185,27 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
 
         hetero_data['indices'] = torch.tensor([item], dtype=torch.long)
 
+        # virtual_node = np.array([[
+        #     n_mpmts / self.mpmt_positions.shape[1], 
+        #     np.sum(total_charge),
+        #     mean_time.mean(),
+        #     self.event_hit_times.min(),
+        # ]])
+
+        virtual_node = np.array([[
+            n_mpmts / self.mpmt_positions.shape[1],
+            np.sum(total_charge) / n_mpmts,  # mean charge per mPMT rather than total
+            mean_time.mean() / 1000.,         # consistent with pmt time normalisation
+            self.event_hit_times.min() / 1000.,
+        ]])
+        hetero_data['virtual_node'].x = torch.tensor(virtual_node, dtype=torch.float32)
+
+        all_mpmt_idx = torch.arange(n_mpmts, dtype=torch.long)
+        global_idx = torch.zeros(n_mpmts, dtype=torch.long)
+
+        hetero_data['mpmt', 'reports_to', 'virtual_node'].edge_index = torch.stack([all_mpmt_idx, global_idx])
+        hetero_data['virtual_node', 'attends_to', 'mpmt'].edge_index = torch.stack([global_idx, all_mpmt_idx])
+
         # hetero_data['positions'] = hetero_data['positions'][:, [2, 1, 0]] 
         
         # print(f"positions shape: {hetero_data['positions'].shape}, values: {hetero_data['positions']}")
