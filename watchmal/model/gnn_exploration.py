@@ -277,7 +277,7 @@ class HierTrans(nn.Module):
         # attends_to = data['virtual_node', 'attends_to', 'mpmt'].edge_index
 
         for conv in self.pmt_layers:
-            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training) # + x_p
+            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training) + x_p
 
         # x_m = F.dropout(F.relu(self.pool_conv(
         #     (x_p, x_m), belongs_to,
@@ -304,7 +304,7 @@ class HierTrans(nn.Module):
         # x_m = x_m + self.attends_to_conv((x_v, x_m), attends_to)
 
         for conv in self.mpmt_layers:
-            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) # + x_m
+            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) + x_m
 
         # x_v = self.reports_to_conv((x_m, x_v), reports_to)
         # x_m = x_m + self.attends_to_conv((x_v, x_m), attends_to)
