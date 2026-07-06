@@ -1,6 +1,6 @@
 defaults:
-    - data: wcte_data
-    - model: resnet50
+    - data: wcte_data_multiring
+    - model: resnet50_multiring
     - tasks/train: train_resnet
     - tasks/restore_best_state: restore_best_state
     - tasks/evaluate: test

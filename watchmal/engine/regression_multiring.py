@@ -13,18 +13,33 @@ def three_momenta_metrics(reco, true):
             'direction error': torch.mean(torch.arccos(torch.clamp(torch.sum(reco * true, dim=-1)
                                                                     / (reco_mag * true_mag), -1, 1)))}
 
+# metric_functions = {
+#     'positions':  # mean 3D position error
+#         lambda x, y: {'position error': torch.mean(torch.linalg.vector_norm(x-y, dim=1))},
+#     'directions':  # mean angle between directions
+#         lambda x, y: {'direction error': torch.mean(torch.arccos(torch.clamp(torch.sum(x*y, dim=-1)
+#                                                 / torch.linalg.vector_norm(x, dim=-1), -1, 1)))},
+#     'angles':  # mean angle between directions
+#         lambda x, y: {'direction error': torch.mean(torch.arccos(torch.cos(x[:, 0])*torch.cos(y[:, 0])
+#                                                 + torch.sin(x[:, 0])*torch.sin(y[:, 0])*torch.cos(x[:, 1]-y[:, 1])))},
+#     'energies':  # mean fractional error
+#         lambda x, y: {'energy bias': torch.mean((x - y) / y),
+#                       'energy error': torch.mean(torch.abs(x-y)/y)},
+#     'three_momenta':  three_momenta_metrics,
+# }
+
 metric_functions = {
     'positions':  # mean 3D position error
-        lambda x, y: {'position error': torch.mean(torch.linalg.vector_norm(x-y, dim=1))},
+        lambda x, y: {'position error': torch.mean(torch.linalg.vector_norm(x-y, dim=-1), dim=0)},
     'directions':  # mean angle between directions
         lambda x, y: {'direction error': torch.mean(torch.arccos(torch.clamp(torch.sum(x*y, dim=-1)
-                                                / torch.linalg.vector_norm(x, dim=-1), -1, 1)))},
+                                                / torch.linalg.vector_norm(x, dim=-1), -1, 1)), dim=0)},
     'angles':  # mean angle between directions
-        lambda x, y: {'direction error': torch.mean(torch.arccos(torch.cos(x[:, 0])*torch.cos(y[:, 0])
-                                                + torch.sin(x[:, 0])*torch.sin(y[:, 0])*torch.cos(x[:, 1]-y[:, 1])))},
+        lambda x, y: {'direction error': torch.stack([torch.mean(torch.arccos(torch.cos(x[:,i, 0])*torch.cos(y[:,i, 0]) # cld add clamp if nans
+                                                + torch.sin(x[:,i, 0])*torch.sin(y[:,i, 0])*torch.cos(x[:,i, 1]-y[:,i, 1]))) for i in range(x.shape[1])])},
     'energies':  # mean fractional error
-        lambda x, y: {'energy bias': torch.mean((x - y) / y),
-                      'energy error': torch.mean(torch.abs(x-y)/y)},
+        lambda x, y: {'energy bias': torch.mean((x - y) / y, dim=0),
+                      'energy error': torch.mean(torch.abs(x-y)/y, dim=0)},
     'three_momenta':  three_momenta_metrics,
 }
 
@@ -83,27 +98,29 @@ class RegressionEngine(ReconstructionEngine):
         else:
             self.target_dict = {t: getattr(data, t).to(self.device) for t in self.target_key}
 
+        # if self.target_sizes is None:
+        #     self.target_sizes = [v.shape[-1] if len(v.shape) > 1 else 1
+        #                         for v in self.target_dict.values()]
         if self.target_sizes is None:
-            self.target_sizes = [v.shape[-1] if len(v.shape) > 1 else 1
+            self.target_sizes = [v[0].shape[-1] if len(v[0].shape) > 1 else 1 # taking the first dimension
                                 for v in self.target_dict.values()]
-        self.stacked_target = torch.column_stack([
+        self.stacked_target = torch.cat([
             (v - self.offset[t]) / self.scale[t]
             for t, v in self.target_dict.items()
-        ])
+        ], dim = -1)
 
         # for t, v in self.target_dict.items():
         #     print(f"{t} shape: {v.shape}, first row: {v[0]}")
-
-
 
     def forward_pass(self):
         """Compute predictions for a batch of data"""
         # evaluate the model on the data
         self.model_out = self.model(self.data)
         # split the output for each target
-        split_model_out = torch.split(self.model_out, self.target_sizes, dim=1)
-        self.predictions = {"predicted_" + t: o * self.scale[t] + self.offset[t]
-                            for t, o in zip(self.target_key, split_model_out)}
+        split_model_out = torch.split(self.model_out, self.target_sizes, dim=-1) # along the last dim
+
+        self.predictions = {"predicted_" + t: o* self.scale[t] + self.offset[t]
+                        for t, o in zip(self.target_key, split_model_out)}
 
         # print(f"target x: {self.stacked_target[:3, 0]}")
         # print(f"target y: {self.stacked_target[:3, 1]}")
@@ -114,17 +131,26 @@ class RegressionEngine(ReconstructionEngine):
 
         if self.target_dict is None:
             return self.predictions
-        return self.target_dict | self.predictions
-    
-
         
+        return self.target_dict | self.predictions
 
     def compute_metrics(self):
         self.loss = self.criterion(self.model_out, self.stacked_target)
         # return loss and metrics for the predictions
-        metrics = {k: m for t, v in self.target_dict.items() if t in metric_functions
-                   for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items()}
+        # metrics = {k: m for t, v in self.target_dict.items() if t in metric_functions
+        #            for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items()}
+        metrics = {}
+
+        for t, v in self.target_dict.items():
+            if t not in metric_functions:
+                continue
+            else:
+                for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items():
+                    for i in range(v.shape[1]):
+                        metrics[k+f'slot{i}'] = m[i]
+
         metrics['loss'] = self.loss
+
         return metrics
 
     def save_state(self, suffix="", name=None):

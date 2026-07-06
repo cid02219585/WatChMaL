@@ -1,0 +1,3 @@
+_target_: watchmal.engine.regression_multiring.RegressionEngine
+target_key: 'positions'
+clip_grad_norm: null

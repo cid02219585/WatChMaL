@@ -5,6 +5,6 @@ virtual_in: 4
 h_feat: 64
 num_output_channels: 7
 num_heads: 4    
-num_layers: 3
+num_layers: 4
 dropout: 0.0
 aggr: 'sum'

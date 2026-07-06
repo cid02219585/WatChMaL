@@ -79,11 +79,15 @@ class NonHierGAT(nn.Module):
         }
 
         for conv in self.convs:
-            x_dict = conv(x_dict, edge_index_dict)
-            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
-                      for key, x in x_dict.items()}
+            # x_dict = conv(x_dict, edge_index_dict)
+            # x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
+            #           for key, x in x_dict.items()}
+            x_dict_new = conv(x_dict, edge_index_dict)
+            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training) + x_dict[key]
+                    for key, x in x_dict_new.items()}
 
         out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+        # out = x_dict['virtual_node']
 
         return self.out_layer(out)
 
@@ -207,7 +211,6 @@ class NonHierTrans(nn.Module):
             ('pmt', 'neighbours', 'pmt'): data['pmt', 'neighbours', 'pmt'].edge_index,
         }
 
-
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
             x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
@@ -248,6 +251,9 @@ class HierTrans(nn.Module):
             for _ in range(num_mpmt_layers)
         ])
 
+        self.mpmt_norm    = nn.LayerNorm(h_feat)
+        self.virtual_norm = nn.LayerNorm(h_feat)
+
         # self.reports_to_conv = TransformerConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False)
         # self.attends_to_conv = TransformerConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False)
 
@@ -271,7 +277,7 @@ class HierTrans(nn.Module):
         # attends_to = data['virtual_node', 'attends_to', 'mpmt'].edge_index
 
         for conv in self.pmt_layers:
-            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training)
+            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training) # + x_p
 
         # x_m = F.dropout(F.relu(self.pool_conv(
         #     (x_p, x_m), belongs_to,
@@ -287,12 +293,18 @@ class HierTrans(nn.Module):
         # x_m = F.relu(self.pool_proj(torch.cat([x_m, x_m_frompmt], dim=-1)))
 
         # Broadcast to each mPMT using batch index
-        x_m = x_m + x_v[data['mpmt'].batch]
+        # x_m = x_m + x_v[data['mpmt'].batch]
+
+        x_m = self.mpmt_norm(x_m)          # normalise scattered features
+        x_v_broadcast = self.virtual_norm(x_v[data['mpmt'].batch])  # normalise virtual
+        x_m = x_m + x_v_broadcast 
+
+
 
         # x_m = x_m + self.attends_to_conv((x_v, x_m), attends_to)
 
         for conv in self.mpmt_layers:
-            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training)
+            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) # + x_m
 
         # x_v = self.reports_to_conv((x_m, x_v), reports_to)
         # x_m = x_m + self.attends_to_conv((x_v, x_m), attends_to)

@@ -1,0 +1,7 @@
+defaults:
+  - resnet_defaults
+
+h_feat_dec: 128
+num_slots: 2
+
+_target_: watchmal.model.resnet_multi_ring_enc_dec.EncoderDecoder
