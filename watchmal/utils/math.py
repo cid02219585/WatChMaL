@@ -137,7 +137,8 @@ def polar_to_cartesian(angles):
     zenith = angles[..., 0]
     azimuth = angles[..., 1]
     dir_along = np.cos(zenith)
-    dir_trans = np.column_stack((np.sin(zenith) * np.cos(azimuth), np.sin(zenith) * np.sin(azimuth)))
+    # dir_trans = np.column_stack((np.sin(zenith) * np.cos(azimuth), np.sin(zenith) * np.sin(azimuth)))
+    dir_trans = np.stack((np.sin(zenith) * np.cos(azimuth), np.sin(zenith) * np.sin(azimuth)), axis=-1)
     return dir_along, dir_trans
 
 
@@ -160,7 +161,7 @@ def direction_from_angles(angles, zenith_axis=None):
     dir_along, dir_trans = polar_to_cartesian(angles)
     if zenith_axis is None:
         zenith_axis = DEFAULT_TANK_AXIS
-    return np.insert(dir_trans, zenith_axis, dir_along, axis=1)
+    return np.insert(dir_trans, zenith_axis, dir_along, axis=-1)
 
 
 def angles_from_direction(direction, zenith_axis=None):
@@ -186,7 +187,8 @@ def angles_from_direction(direction, zenith_axis=None):
     dir_trans = np.delete(direction, zenith_axis, axis=-1)
     zenith = np.arccos(dir_along)
     azimuth = np.arctan2(dir_trans[..., 1], dir_trans[..., 0])
-    return np.column_stack((zenith, azimuth))
+    # return np.column_stack((zenith, azimuth))
+    return np.stack((zenith, azimuth), axis=-1)
 
 
 def angle_between_directions(direction1, direction2, degrees=False):
