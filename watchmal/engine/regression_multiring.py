@@ -171,7 +171,7 @@ class RegressionEngine(ReconstructionEngine):
             else:
                 for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items():
                     for i in range(v.shape[1]):
-                        metrics[k+f'slot{i}'] = m[i]
+                        metrics[k+f'slot{i}'] = m[i].reshape(())
 
         metrics['loss'] = self.loss
 
