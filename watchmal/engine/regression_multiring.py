@@ -133,7 +133,7 @@ class RegressionEngine(ReconstructionEngine):
             if scaled.dim() == 2: # bc energies may only
                 scaled = scaled.unsqueeze(-1)
             scaled_targets.append(scaled)
-
+            
         self.stacked_target = torch.cat(scaled_targets, dim=-1)
 
     def forward_pass(self):

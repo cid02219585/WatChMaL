@@ -176,11 +176,35 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         hetero_data['mpmt', 'neighbours', 'mpmt'].edge_index = mpmt_to_mpmt
         hetero_data['mpmt', 'neighbours', 'mpmt'].edge_attr = mpmt_edge_attr
 
+        # for key in ['positions', 'directions', 'energies', 'angles']:
+        #     if key in data_dict:
+        #         val = torch.tensor(data_dict[key], dtype=torch.float32)
+        #         if val.dim() == 1:
+        #             val = val.unsqueeze(0)
+        #         hetero_data[key] = val
+
         for key in ['positions', 'directions', 'energies', 'angles']:
             if key in data_dict:
                 val = torch.tensor(data_dict[key], dtype=torch.float32)
-                if val.dim() == 1:
-                    val = val.unsqueeze(0)
+                print("before", key, val.shape)
+
+                if key in ['positions', 'directions']:
+                    if val.dim() == 2:
+                        val = val.unsqueeze(0)
+
+                elif key == 'energies':
+                    if val.dim() == 1:
+                        val = val.unsqueeze(0).unsqueeze(-1)
+                    elif val.dim() == 2:
+                        val = val.unsqueeze(0)
+
+                elif key == 'angles':
+                    if val.dim() == 1:
+                        val = val.unsqueeze(0).unsqueeze(-1)
+                    elif val.dim() == 2:
+                        val = val.unsqueeze(0)
+                print("after", key, val.shape)
+
                 hetero_data[key] = val
 
         hetero_data['indices'] = torch.tensor([item], dtype=torch.long)
