@@ -11,5 +11,3 @@ engine:
   target_scale_factor:
     positions: 1
     directions: 0.01
-model:
-  num_output_channels: 6

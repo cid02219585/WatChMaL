@@ -164,7 +164,7 @@ def resnet50_encoder(**kwargs):
 
 class Decoder(nn.Module):
     """The base decoder interface for the encoder--decoder architecture."""
-    def __init__(self, h_feat_dec=128, num_output_channels=7, num_slots=2):
+    def __init__(self, h_feat_dec=2048, num_output_channels=7, num_slots=2):
         super().__init__()
         self.heads = nn.ModuleList([
             nn.Sequential(
