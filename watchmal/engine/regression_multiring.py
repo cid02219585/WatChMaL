@@ -119,6 +119,9 @@ class RegressionEngine(ReconstructionEngine):
         else:
             self.target_dict = {t: getattr(data, t).to(self.device) for t in self.target_key}
 
+        for t, v in self.target_dict.items():
+            if v.dim() == 2:
+                self.target_dict[t] = v.unsqueeze(-1)
         if self.target_sizes is None:
             self.target_sizes = [v[0].shape[-1] if len(v[0].shape) > 1 else 1  # taking the first dimension
                                 for v in self.target_dict.values()]
@@ -126,7 +129,7 @@ class RegressionEngine(ReconstructionEngine):
         scaled_targets = []
         for t, v in self.target_dict.items():
             scaled = (v - self.offset[t]) / self.scale[t]
-            if scaled.dim() == 2:  # e.g. energies with shape (batch, num_slots) — add trailing feature dim
+            if scaled.dim() == 2: # bc energies may only
                 scaled = scaled.unsqueeze(-1)
             scaled_targets.append(scaled)
 
