@@ -91,6 +91,27 @@ class RegressionEngine(ReconstructionEngine):
     #     # scale and stack the targets for calculating the loss
     #     self.stacked_target = torch.column_stack([(v - self.offset[t]) / self.scale[t] for t, v in self.target_dict.items()])
 
+    # def process_target(self, data):
+    #     """Extract target(s) from either a dict batch or a PyG Batch/Data object."""
+    #     if isinstance(data, Mapping):
+    #         self.target_dict = {t: data[t].to(self.device) for t in self.target_key}
+    #     else:
+    #         self.target_dict = {t: getattr(data, t).to(self.device) for t in self.target_key}
+
+    #     # if self.target_sizes is None:
+    #     #     self.target_sizes = [v.shape[-1] if len(v.shape) > 1 else 1
+    #     #                         for v in self.target_dict.values()]
+    #     if self.target_sizes is None:
+    #         self.target_sizes = [v[0].shape[-1] if len(v[0].shape) > 1 else 1 # taking the first dimension
+    #                             for v in self.target_dict.values()]
+    #     self.stacked_target = torch.cat([
+    #         (v - self.offset[t]) / self.scale[t]
+    #         for t, v in self.target_dict.items()
+    #     ], dim = -1)
+
+    #     # for t, v in self.target_dict.items():
+    #     #     print(f"{t} shape: {v.shape}, first row: {v[0]}")
+
     def process_target(self, data):
         """Extract target(s) from either a dict batch or a PyG Batch/Data object."""
         if isinstance(data, Mapping):
@@ -98,19 +119,18 @@ class RegressionEngine(ReconstructionEngine):
         else:
             self.target_dict = {t: getattr(data, t).to(self.device) for t in self.target_key}
 
-        # if self.target_sizes is None:
-        #     self.target_sizes = [v.shape[-1] if len(v.shape) > 1 else 1
-        #                         for v in self.target_dict.values()]
         if self.target_sizes is None:
-            self.target_sizes = [v[0].shape[-1] if len(v[0].shape) > 1 else 1 # taking the first dimension
+            self.target_sizes = [v[0].shape[-1] if len(v[0].shape) > 1 else 1  # taking the first dimension
                                 for v in self.target_dict.values()]
-        self.stacked_target = torch.cat([
-            (v - self.offset[t]) / self.scale[t]
-            for t, v in self.target_dict.items()
-        ], dim = -1)
 
-        # for t, v in self.target_dict.items():
-        #     print(f"{t} shape: {v.shape}, first row: {v[0]}")
+        scaled_targets = []
+        for t, v in self.target_dict.items():
+            scaled = (v - self.offset[t]) / self.scale[t]
+            if scaled.dim() == 2:  # e.g. energies with shape (batch, num_slots) — add trailing feature dim
+                scaled = scaled.unsqueeze(-1)
+            scaled_targets.append(scaled)
+
+        self.stacked_target = torch.cat(scaled_targets, dim=-1)
 
     def forward_pass(self):
         """Compute predictions for a batch of data"""
