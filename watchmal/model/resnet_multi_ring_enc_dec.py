@@ -84,7 +84,7 @@ class Bottleneck(nn.Module):
 
 class ResNet_encoder(nn.Module):
 
-    def __init__(self, block, layers, num_input_channels, num_output_channels, zero_init_residual=False,
+    def __init__(self, block, layers, num_input_channels, zero_init_residual=False,
                  conv_pad_mode='zeros', group_norm=False, n_groups=32):
         if group_norm:
             class GroupNorm(nn.GroupNorm):
@@ -109,7 +109,6 @@ class ResNet_encoder(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, conv_pad_mode=conv_pad_mode)
 
         self.avgpool = nn.AdaptiveAvgPool2d((1,1))
-        self.fc = nn.Linear(512 * block.expansion, num_output_channels)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -159,6 +158,8 @@ class ResNet_encoder(nn.Module):
 
         return x
 
+def resnet50_encoder(**kwargs):
+    return ResNet_encoder(Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
 class Decoder(nn.Module):
