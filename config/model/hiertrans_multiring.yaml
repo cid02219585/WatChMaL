@@ -1,0 +1,19 @@
+_target_: watchmal.model.gnn_multi_ring_enc_dec.EncoderDecoder
+
+encoder:
+  _target_: watchmal.model.gnn_multi_ring_enc_dec.HierTrans_encoder
+  pmt_in: 8
+  mpmt_in: 6
+  virtual_in: 4
+  h_feat: 64
+  num_output_channels: 7
+  num_heads: 4
+  num_mpmt_layers: 5
+  dropout: 0.0
+  num_pmt_layers: 1
+
+decoder:
+  _target_: watchmal.model.gnn_multi_ring_enc_dec.Decoder
+  h_feat_dec: 128
+  num_output_channels: 7
+  num_slots: 2

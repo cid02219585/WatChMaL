@@ -61,6 +61,57 @@ class NonHierGAT_encoder(nn.Module):
 
         return global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
 
+class HierTrans_encoder(nn.Module):
+    def __init__(self, pmt_in, mpmt_in, virtual_in, h_feat,
+                 num_pmt_layers=1, num_mpmt_layers=3, num_heads=4, dropout=0.0):
+        super().__init__()
+        self.dropout = dropout
+
+        self.pmt_encoder  = nn.Linear(pmt_in,  h_feat)
+        self.mpmt_encoder = nn.Linear(mpmt_in, h_feat)
+        self.virtual_encoder = nn.Linear(virtual_in, h_feat)
+
+        self.pmt_layers = nn.ModuleList([
+            TransformerConv(h_feat, h_feat, heads=num_heads, concat=False)
+            for _ in range(num_pmt_layers)
+        ])
+
+        self.mpmt_layers = nn.ModuleList([
+            TransformerConv(h_feat, h_feat, heads=num_heads, concat=False)
+            for _ in range(num_mpmt_layers)
+        ])
+
+        self.mpmt_norm    = nn.LayerNorm(h_feat)
+        self.virtual_norm = nn.LayerNorm(h_feat)
+
+    def forward(self, data):
+        x_p = self.pmt_encoder(data['pmt'].x)
+        x_v = self.virtual_encoder(data['virtual_node'].x)
+
+        pmt_edges  = data['pmt',  'neighbours', 'pmt'].edge_index
+        belongs_to = data['pmt',  'belongs_to', 'mpmt'].edge_index
+        mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
+
+        for conv in self.pmt_layers:
+            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training) + x_p
+
+        x_m = scatter_mean(
+            x_p,
+            belongs_to[1],
+            dim=0,
+            dim_size=data['mpmt'].x.size(0),
+            )
+
+        x_m = self.mpmt_norm(x_m)
+        x_v_broadcast = self.virtual_norm(x_v[data['mpmt'].batch]) 
+        x_m = x_m + x_v_broadcast 
+
+        for conv in self.mpmt_layers:
+            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) + x_m
+
+        out = global_add_pool(x_m, data['mpmt'].batch)
+
+        return out
 
 class Decoder(nn.Module):
     """The base decoder interface for the encoder--decoder architecture."""

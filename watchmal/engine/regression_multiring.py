@@ -122,6 +122,7 @@ class RegressionEngine(ReconstructionEngine):
         for t, v in self.target_dict.items():
             if v.dim() == 2:
                 self.target_dict[t] = v.unsqueeze(-1)
+        
         if self.target_sizes is None:
             self.target_sizes = [v[0].shape[-1] if len(v[0].shape) > 1 else 1  # taking the first dimension
                                 for v in self.target_dict.values()]

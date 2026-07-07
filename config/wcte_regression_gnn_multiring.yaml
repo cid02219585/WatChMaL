@@ -1,0 +1,13 @@
+defaults:
+    - wcte_defaults_gnn_multiring
+    - engine: regression_multiring
+    - override loss@tasks.train.loss: huber
+    - override loss@tasks.evaluate.loss: huber
+    - _self_
+engine:
+  target_key:
+    - positions
+    - directions
+  target_scale_factor:
+    positions: 1
+    directions: 0.01
