@@ -186,7 +186,7 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         for key in ['positions', 'directions', 'energies', 'angles']:
             if key in data_dict:
                 val = torch.tensor(data_dict[key], dtype=torch.float32)
-                print("before", key, val.shape)
+                # print("before", key, val.shape)
 
                 if key in ['positions', 'directions']:
                     if val.dim() == 2:
@@ -203,7 +203,7 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
                         val = val.unsqueeze(0).unsqueeze(-1)
                     elif val.dim() == 2:
                         val = val.unsqueeze(0)
-                print("after", key, val.shape)
+                # print("after", key, val.shape)
 
                 hetero_data[key] = val
 
