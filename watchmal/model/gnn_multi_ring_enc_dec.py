@@ -135,12 +135,12 @@ class HierTrans_encoder(nn.Module):
 #         return out
 
 class CrossAttnDecoder(nn.Module):
-    def __init__(self, h_feat, num_output_channels=7, num_slots=2, num_heads=4):
+    def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
         super().__init__()
-        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat) * 0.02)
-        self.cross_attn = nn.MultiheadAttention(h_feat, num_heads, batch_first=True)
+        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
+        self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
         self.heads = nn.ModuleList([
-            nn.Sequential(nn.Linear(h_feat, h_feat), nn.ReLU(), nn.Linear(h_feat, num_output_channels))
+            nn.Sequential(nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels))
             for _ in range(num_slots)
         ])
 
