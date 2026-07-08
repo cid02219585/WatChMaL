@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import TransformerConv, HeteroConv, GATConv, GATv2Conv, global_add_pool, global_mean_pool
 
 from torch_scatter import scatter_mean
+from torch_geometric.utils import to_dense_batch
 
 
 class NonHierGAT_encoder(nn.Module):
@@ -59,7 +60,8 @@ class NonHierGAT_encoder(nn.Module):
             x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training) + x_dict[key]
                     for key, x in x_dict_new.items()}
 
-        return global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+        # return global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+        return x_dict['mpmt'], data['mpmt'].batch
 
 class HierTrans_encoder(nn.Module):
     def __init__(self, pmt_in, mpmt_in, virtual_in, h_feat,
@@ -109,38 +111,70 @@ class HierTrans_encoder(nn.Module):
         for conv in self.mpmt_layers:
             x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) + x_m
 
-        out = global_add_pool(x_m, data['mpmt'].batch)
+        # out = global_add_pool(x_m, data['mpmt'].batch)
 
-        return out
+        return x_m, data['mpmt'].batch
 
-class Decoder(nn.Module):
-    """The base decoder interface for the encoder--decoder architecture."""
-    def __init__(self, h_feat_dec=128, num_output_channels=7, num_slots=2):
+# class Decoder(nn.Module):
+#     """The base decoder interface for the encoder--decoder architecture."""
+#     def __init__(self, h_feat_dec=128, num_output_channels=7, num_slots=2):
+#         super().__init__()
+#         self.heads = nn.ModuleList([
+#             nn.Sequential(
+#                 nn.Linear(h_feat_dec, h_feat_dec),
+#                 nn.ReLU(),
+#                 nn.Linear(h_feat_dec, num_output_channels),  
+#             )
+#             for _ in range(num_slots)
+#         ])
+ 
+#         # self.multihead_attn = nn.ModuleList([nn.MultiheadAttention(embed_dim, n_heads) for _ in range(num_slots)]) - only useful if you have per node embeddings
+
+#     def forward(self, enc_all_outputs):
+#         out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
+#         return out
+
+class CrossAttnDecoder(nn.Module):
+    def __init__(self, h_feat, num_output_channels=7, num_slots=2, num_heads=4):
         super().__init__()
+        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat) * 0.02)
+        self.cross_attn = nn.MultiheadAttention(h_feat, num_heads, batch_first=True)
         self.heads = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(h_feat_dec, h_feat_dec),
-                nn.ReLU(),
-                nn.Linear(h_feat_dec, num_output_channels),  
-            )
+            nn.Sequential(nn.Linear(h_feat, h_feat), nn.ReLU(), nn.Linear(h_feat, num_output_channels))
             for _ in range(num_slots)
         ])
- 
-        # self.multihead_attn = nn.ModuleList([nn.MultiheadAttention(embed_dim, n_heads) for _ in range(num_slots)]) - only useful if you have per node embeddings
 
-    def forward(self, enc_all_outputs):
-        out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
-        return out
+    def forward(self, x_m, batch):
+        x_dense, mask = to_dense_batch(x_m, batch)  
+        B = x_dense.size(0)
+        key_padding_mask = ~mask
 
+        q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
+        attended, _ = self.cross_attn(q, x_dense, x_dense, key_padding_mask=key_padding_mask)
+
+        return torch.stack([h(attended[:, i, :]) for i, h in enumerate(self.heads)], dim=1)
+    
+# class EncoderDecoder(nn.Module):
+#     """The base class for the encoder--decoder architecture."""
+#     def __init__(self, encoder, decoder):
+#         super().__init__()
+#         self.encoder = encoder
+#         self.decoder = decoder
+
+#     def forward(self, data):
+#         enc_all_outputs = self.encoder(data)
+#         output = self.decoder(enc_all_outputs)
+
+#         return output
+    
 class EncoderDecoder(nn.Module):
-    """The base class for the encoder--decoder architecture."""
     def __init__(self, encoder, decoder):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
 
     def forward(self, data):
-        enc_all_outputs = self.encoder(data)
-        output = self.decoder(enc_all_outputs)
+        enc_all_outputs, batch = self.encoder(data)
+        output = self.decoder(enc_all_outputs, batch)
 
         return output
