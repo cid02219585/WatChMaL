@@ -60,8 +60,8 @@ class NonHierGAT_encoder(nn.Module):
             x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training) + x_dict[key]
                     for key, x in x_dict_new.items()}
 
-        return global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
-        # return x_dict['mpmt'], data['mpmt'].batch
+        # return global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+        return x_dict['mpmt'], data['mpmt'].batch
 
 class HierTrans_encoder(nn.Module):
     def __init__(self, pmt_in, mpmt_in, virtual_in, h_feat,
@@ -111,10 +111,10 @@ class HierTrans_encoder(nn.Module):
         for conv in self.mpmt_layers:
             x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) + x_m
 
-        out = global_add_pool(x_m, data['mpmt'].batch)
-        return out
+        # out = global_add_pool(x_m, data['mpmt'].batch)
+        # return out
 
-        # return x_m, data['mpmt'].batch
+        return x_m, data['mpmt'].batch
 
 class Decoder(nn.Module):
     """The base decoder interface for the encoder--decoder architecture."""
