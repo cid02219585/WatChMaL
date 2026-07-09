@@ -153,8 +153,8 @@ class ResNet_encoder(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        # x = self.avgpool(x)
-        # x = torch.flatten(x, 1)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
 
         return x
 
@@ -162,24 +162,24 @@ def resnet50_encoder(**kwargs):
     return ResNet_encoder(Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
-# class Decoder(nn.Module):
-#     """The base decoder interface for the encoder--decoder architecture."""
-#     def __init__(self, h_feat_dec=2048, num_output_channels=7, num_slots=2):
-#         super().__init__()
-#         self.heads = nn.ModuleList([
-#             nn.Sequential(
-#                 nn.Linear(h_feat_dec, h_feat_dec),
-#                 nn.ReLU(),
-#                 nn.Linear(h_feat_dec, num_output_channels),
-#             )
-#             for _ in range(num_slots)
-#         ])
+class Decoder(nn.Module):
+    """The base decoder interface for the encoder--decoder architecture."""
+    def __init__(self, h_feat_dec=2048, num_output_channels=7, num_slots=2):
+        super().__init__()
+        self.heads = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(h_feat_dec, h_feat_dec),
+                nn.ReLU(),
+                nn.Linear(h_feat_dec, num_output_channels),
+            )
+            for _ in range(num_slots)
+        ])
  
-#         # self.multihead_attn = nn.ModuleList([nn.MultiheadAttention(embed_dim, n_heads) for _ in range(num_slots)]) - only useful if you have per node embeddings
+        # self.multihead_attn = nn.ModuleList([nn.MultiheadAttention(embed_dim, n_heads) for _ in range(num_slots)]) - only useful if you have per node embeddings
 
-#     def forward(self, enc_all_outputs):
-#         out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
-#         return out
+    def forward(self, enc_all_outputs):
+        out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
+        return out
 
 class CrossAttnDecoder(nn.Module):
     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
@@ -200,26 +200,26 @@ class CrossAttnDecoder(nn.Module):
 
         return torch.stack([h(attended[:, i, :]) for i, h in enumerate(self.heads)], dim=1)
     
-# class EncoderDecoder(nn.Module):
-#     """The base class for the encoder--decoder architecture."""
-#     def __init__(self, encoder, decoder):
-#         super().__init__()
-#         self.encoder = encoder
-#         self.decoder = decoder
-
-#     def forward(self, data):
-#         enc_all_outputs = self.encoder(data)
-#         output = self.decoder(enc_all_outputs)
-
-#         return output
-
 class EncoderDecoder(nn.Module):
+    """The base class for the encoder--decoder architecture."""
     def __init__(self, encoder, decoder):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
 
     def forward(self, data):
-        feat_map = self.encoder(data)
-        output = self.decoder(feat_map)
+        enc_all_outputs = self.encoder(data)
+        output = self.decoder(enc_all_outputs)
+
         return output
+
+# class EncoderDecoder(nn.Module):
+#     def __init__(self, encoder, decoder):
+#         super().__init__()
+#         self.encoder = encoder
+#         self.decoder = decoder
+
+#     def forward(self, data):
+#         feat_map = self.encoder(data)
+#         output = self.decoder(feat_map)
+#         return output

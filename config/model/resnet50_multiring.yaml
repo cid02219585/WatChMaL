@@ -6,7 +6,7 @@ encoder:
   conv_pad_mode: circular
 
 decoder:
-  _target_: watchmal.model.resnet_multi_ring_enc_dec.CrossAttnDecoder
+  _target_: watchmal.model.resnet_multi_ring_enc_dec.Decoder
   h_feat_dec: 2048
   num_output_channels: 7
   num_slots: 2
