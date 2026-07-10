@@ -180,7 +180,7 @@ class RegressionEngine(ReconstructionEngine):
 
     def compute_metrics(self):
         B = self.model_out.shape[0]
-        w_pos = 1.0
+        w_pos = 1.0 / 100.0**2 
         w_dir = 1.0
         w_energy = 1.0
 
