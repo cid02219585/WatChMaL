@@ -58,6 +58,7 @@ class H5CommonDataset(Dataset, ABC):
         self.target_key = None
         self.targets = None
         self.unmapped_labels = None
+        self.ordering_energies = None
 
     def set_target(self, target_key):
         self.target_key = target_key
@@ -91,6 +92,7 @@ class H5CommonDataset(Dataset, ABC):
         so in that case this function should instead be called only once first actually loading some data.
         """
         self.h5_file = h5py.File(self.h5_path, "r")
+        self.ordering_energies = self.h5_file["energies"]
 
         self.event_hits_index = np.append(self.h5_file["event_hits_index"], self.h5_file["hit_pmt"].shape[0]).astype(np.int64)
         self.hit_pmt = self.load_hits("hit_pmt")
@@ -137,7 +139,8 @@ class H5CommonDataset(Dataset, ABC):
     def __getitem__(self, item):
         if not self.initialized:
             self.initialize()
-        order = np.argsort(-self.targets['energies'][item])  # consistent ordering of the two particles -- but i think it might already be like this
+        # order = np.argsort(-self.targets['energies'][item])  # consistent ordering of the two particles -- but i think it might already be like this
+        order = np.argsort(-self.ordering_energies[item])
         data_dict = {k: t[item][order].copy() for k, t in self.targets.items()}
         data_dict["indices"] = item
         return data_dict
