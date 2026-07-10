@@ -219,14 +219,14 @@ class CrossAttnDecoder(nn.Module):
         out = self.head(attended.reshape(B * S, H))
         return out.reshape(B, S, -1)
     
-# class EncoderDecoder(nn.Module):
-#     def __init__(self, encoder, decoder):
-#         super().__init__()
-#         self.encoder = encoder
-#         self.decoder = decoder
+class EncoderDecoder(nn.Module):
+    def __init__(self, encoder, decoder):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
 
-#     def forward(self, data):
-#         enc_all_outputs, batch = self.encoder(data)
-#         output = self.decoder(enc_all_outputs, batch)
+    def forward(self, data):
+        enc_all_outputs, batch = self.encoder(data)
+        output = self.decoder(enc_all_outputs, batch)
 
-#         return output
+        return output
