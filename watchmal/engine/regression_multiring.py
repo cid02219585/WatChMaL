@@ -159,117 +159,117 @@ class RegressionEngine(ReconstructionEngine):
         
         return self.target_dict | self.predictions
 
-    def compute_metrics(self):
-        self.loss = self.criterion(self.model_out, self.stacked_target)
-        # return loss and metrics for the predictions
-        # metrics = {k: m for t, v in self.target_dict.items() if t in metric_functions
-        #            for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items()}
-        metrics = {}
-
-        for t, v in self.target_dict.items():
-            if t not in metric_functions:
-                continue
-            else:
-                for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items():
-                    for i in range(v.shape[1]):
-                        metrics[k+f'slot{i}'] = m[i].reshape(())
-
-        metrics['loss'] = self.loss
-
-        return metrics
-
     # def compute_metrics(self):
-    #     B = self.model_out.shape[0]
-    #     w_pos = 1.0 / 100.0**2 
-    #     w_dir = 1.0
-    #     w_energy = 1.0
-
-    #     pred_dict = {
-    #         t: self.predictions["predicted_" + t]
-    #         for t in self.target_key
-    #     }  # (B, 2, d_t)
-    #     true_dict = self.target_dict  # (B, 2, d_t)
-
-    #     def per_ring_loss(pred_d, true_d):
-    #         # Position: (B, 2)
-    #         pos_loss = ((pred_d["positions"] - true_d["positions"]) ** 2).mean(dim=-1)
-
-    #         # Direction: (B, 2)
-    #         pred_dir = pred_d["directions"]
-    #         true_dir = true_d["directions"]
-    #         pred_dir_n = pred_dir / (
-    #             torch.linalg.vector_norm(pred_dir, dim=-1, keepdim=True) + 1e-8
-    #         )
-    #         true_dir_n = true_dir / (
-    #             torch.linalg.vector_norm(true_dir, dim=-1, keepdim=True) + 1e-8
-    #         )
-    #         dir_loss = 1.0 - torch.sum(pred_dir_n * true_dir_n, dim=-1)
-
-    #         # Energy: (B, 2)
-    #         pred_e = torch.clamp(pred_d["energies"].squeeze(-1), min=1e-3)
-    #         true_e = torch.clamp(true_d["energies"].squeeze(-1), min=1e-3)
-    #         energy_loss = (torch.log(pred_e) - torch.log(true_e)) ** 2
-
-    #         total_loss = (
-    #             w_pos * pos_loss
-    #             + w_dir * dir_loss
-    #             + w_energy * energy_loss
-    #         )
-    #         components = {
-    #             "pos_loss": pos_loss,
-    #             "dir_loss": dir_loss,
-    #             "energy_loss": energy_loss,
-    #         }
-    #         return total_loss, components
-
-    #     straight_loss, straight_components = per_ring_loss(pred_dict, true_dict)
-
-    #     true_dict_swapped = {
-    #         t: v.flip(dims=[1])
-    #         for t, v in true_dict.items()
-    #     }
-    #     swapped_loss, swapped_components = per_ring_loss(pred_dict, true_dict_swapped)
-
-    #     straight_total = straight_loss.sum(dim=-1)  # (B,)
-    #     swapped_total = swapped_loss.sum(dim=-1)    # (B,)
-
-    #     # Warm-up: matching against untrained predictions is unstable (target flips
-    #     # almost every batch when pred is close to random). Use fixed ("straight")
-    #     # assignment for the first warmup_iterations, then switch to real matching.
-    #     if self.iteration < self.warmup_iterations:
-    #         use_swapped = torch.zeros(B, dtype=torch.bool, device=self.device)
-    #     else:
-    #         use_swapped = swapped_total < straight_total
-
-    #     matched_total = torch.where(use_swapped, swapped_total, straight_total)
-    #     self.loss = matched_total.mean()
-
+    #     self.loss = self.criterion(self.model_out, self.stacked_target)
+    #     # return loss and metrics for the predictions
+    #     # metrics = {k: m for t, v in self.target_dict.items() if t in metric_functions
+    #     #            for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items()}
     #     metrics = {}
-    #     metrics["loss"] = self.loss
-    #     metrics["straight_loss"] = straight_total.mean()
-    #     metrics["swapped_loss"] = swapped_total.mean()
-    #     metrics["swap_fraction"] = use_swapped.float().mean()
 
-    #     # Component losses for scale debugging
-    #     metrics["straight_pos_loss"] = straight_components["pos_loss"].mean()
-    #     metrics["straight_dir_loss"] = straight_components["dir_loss"].mean()
-    #     metrics["straight_energy_loss"] = straight_components["energy_loss"].mean()
-
-    #     # Matched targets for normal metric functions
-    #     use_swapped_m = use_swapped.detach().view(B, 1, 1)
     #     for t, v in self.target_dict.items():
     #         if t not in metric_functions:
     #             continue
-    #         pred_t = self.predictions["predicted_" + t]
-    #         v_swapped = v.flip(dims=[1])
-    #         matched_v = torch.where(use_swapped_m, v_swapped, v)
-    #         for i in range(matched_v.shape[1]):
-    #             pred_i = pred_t[:, i]
-    #             true_i = matched_v[:, i]
-    #             for k, m in metric_functions[t](pred_i, true_i).items():
-    #                 metrics[f"{k}_slot{i}"] = m.reshape(())
+    #         else:
+    #             for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items():
+    #                 for i in range(v.shape[1]):
+    #                     metrics[k+f'slot{i}'] = m[i].reshape(())
+
+    #     metrics['loss'] = self.loss
 
     #     return metrics
+
+    def compute_metrics(self):
+        B = self.model_out.shape[0]
+        w_pos = 1.0 / 100.0**2 
+        w_dir = 1.0
+        w_energy = 1.0
+
+        pred_dict = {
+            t: self.predictions["predicted_" + t]
+            for t in self.target_key
+        }  # (B, 2, d_t)
+        true_dict = self.target_dict  # (B, 2, d_t)
+
+        def per_ring_loss(pred_d, true_d):
+            # Position: (B, 2)
+            pos_loss = ((pred_d["positions"] - true_d["positions"]) ** 2).mean(dim=-1)
+
+            # Direction: (B, 2)
+            pred_dir = pred_d["directions"]
+            true_dir = true_d["directions"]
+            pred_dir_n = pred_dir / (
+                torch.linalg.vector_norm(pred_dir, dim=-1, keepdim=True) + 1e-8
+            )
+            true_dir_n = true_dir / (
+                torch.linalg.vector_norm(true_dir, dim=-1, keepdim=True) + 1e-8
+            )
+            dir_loss = 1.0 - torch.sum(pred_dir_n * true_dir_n, dim=-1)
+
+            # Energy: (B, 2)
+            pred_e = torch.clamp(pred_d["energies"].squeeze(-1), min=1e-3)
+            true_e = torch.clamp(true_d["energies"].squeeze(-1), min=1e-3)
+            energy_loss = (torch.log(pred_e) - torch.log(true_e)) ** 2
+
+            total_loss = (
+                w_pos * pos_loss
+                + w_dir * dir_loss
+                + w_energy * energy_loss
+            )
+            components = {
+                "pos_loss": pos_loss,
+                "dir_loss": dir_loss,
+                "energy_loss": energy_loss,
+            }
+            return total_loss, components
+
+        straight_loss, straight_components = per_ring_loss(pred_dict, true_dict)
+
+        true_dict_swapped = {
+            t: v.flip(dims=[1])
+            for t, v in true_dict.items()
+        }
+        swapped_loss, swapped_components = per_ring_loss(pred_dict, true_dict_swapped)
+
+        straight_total = straight_loss.sum(dim=-1)  # (B,)
+        swapped_total = swapped_loss.sum(dim=-1)    # (B,)
+
+        # Warm-up: matching against untrained predictions is unstable (target flips
+        # almost every batch when pred is close to random). Use fixed ("straight")
+        # assignment for the first warmup_iterations, then switch to real matching.
+        if self.iteration < self.warmup_iterations:
+            use_swapped = torch.zeros(B, dtype=torch.bool, device=self.device)
+        else:
+            use_swapped = swapped_total < straight_total
+
+        matched_total = torch.where(use_swapped, swapped_total, straight_total)
+        self.loss = matched_total.mean()
+
+        metrics = {}
+        metrics["loss"] = self.loss
+        metrics["straight_loss"] = straight_total.mean()
+        metrics["swapped_loss"] = swapped_total.mean()
+        metrics["swap_fraction"] = use_swapped.float().mean()
+
+        # Component losses for scale debugging
+        metrics["straight_pos_loss"] = straight_components["pos_loss"].mean()
+        metrics["straight_dir_loss"] = straight_components["dir_loss"].mean()
+        metrics["straight_energy_loss"] = straight_components["energy_loss"].mean()
+
+        # Matched targets for normal metric functions
+        use_swapped_m = use_swapped.detach().view(B, 1, 1)
+        for t, v in self.target_dict.items():
+            if t not in metric_functions:
+                continue
+            pred_t = self.predictions["predicted_" + t]
+            v_swapped = v.flip(dims=[1])
+            matched_v = torch.where(use_swapped_m, v_swapped, v)
+            for i in range(matched_v.shape[1]):
+                pred_i = pred_t[:, i]
+                true_i = matched_v[:, i]
+                for k, m in metric_functions[t](pred_i, true_i).items():
+                    metrics[f"{k}_slot{i}"] = m.reshape(())
+
+        return metrics
 
     def save_state(self, suffix="", name=None):
         self.state_data["target_sizes"] = self.target_sizes
