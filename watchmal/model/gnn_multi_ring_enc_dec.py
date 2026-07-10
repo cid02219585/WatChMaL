@@ -40,6 +40,15 @@ class NonHierGAT_encoder(nn.Module):
             
             self.convs.append(conv)
 
+            self.norms = nn.ModuleList([
+                nn.ModuleDict({
+                    "pmt": nn.LayerNorm(h_feat),
+                    "mpmt": nn.LayerNorm(h_feat),
+                    "virtual_node": nn.LayerNorm(h_feat),
+                })
+                for _ in range(num_layers)
+            ])
+
     def forward(self, data):
         x_dict = {
             'pmt':  self.pmt_encoder(data['pmt'].x),
@@ -55,12 +64,27 @@ class NonHierGAT_encoder(nn.Module):
             ('virtual_node', 'attends_to', 'mpmt'): data['virtual_node', 'attends_to', 'mpmt'].edge_index,
         }
 
-        for conv in self.convs:
-            x_dict_new = conv(x_dict, edge_index_dict)
-            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training) + x_dict[key]
-                    for key, x in x_dict_new.items()}
+        # for conv in self.convs:
+        #     x_dict_new = conv(x_dict, edge_index_dict)
+        #     x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training) + x_dict[key]
+        #             for key, x in x_dict_new.items()}
 
-        # return global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+        for conv, norms in zip(self.convs, self.norms):
+            x_dict_new = conv(x_dict, edge_index_dict)
+
+            x_dict = {
+                key: norms[key](
+                    x_dict[key]
+                    + F.dropout(
+                        F.gelu(x),
+                        p=self.dropout,
+                        training=self.training,
+                    )
+                )
+                for key, x in x_dict_new.items()
+            }
+
+                # return global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
         return x_dict['mpmt'], data['mpmt'].batch
 
 class HierTrans_encoder(nn.Module):
@@ -85,7 +109,16 @@ class HierTrans_encoder(nn.Module):
 
         self.mpmt_norm    = nn.LayerNorm(h_feat)
         self.virtual_norm = nn.LayerNorm(h_feat)
+        
+        self.pmt_norms = nn.ModuleList([
+            nn.LayerNorm(h_feat)
+            for _ in range(num_pmt_layers)
+        ])
 
+        self.mpmt_norms = nn.ModuleList([
+            nn.LayerNorm(h_feat)
+            for _ in range(num_mpmt_layers)
+        ])
     def forward(self, data):
         x_p = self.pmt_encoder(data['pmt'].x)
         x_v = self.virtual_encoder(data['virtual_node'].x)
@@ -94,8 +127,19 @@ class HierTrans_encoder(nn.Module):
         belongs_to = data['pmt',  'belongs_to', 'mpmt'].edge_index
         mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
 
-        for conv in self.pmt_layers:
-            x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training) + x_p
+        # for conv in self.pmt_layers:
+        #     x_p = F.dropout(F.relu(conv(x_p, pmt_edges)),p=self.dropout, training=self.training) + x_p
+
+        for conv, norm in zip(self.pmt_layers, self.pmt_norms):
+            update = conv(x_p, pmt_edges)
+            x_p = norm(
+                x_p
+                + F.dropout(
+                    F.gelu(update),
+                    p=self.dropout,
+                    training=self.training,
+                )
+            )
 
         x_m = scatter_mean(
             x_p,
@@ -108,8 +152,19 @@ class HierTrans_encoder(nn.Module):
         x_v_broadcast = self.virtual_norm(x_v[data['mpmt'].batch]) 
         x_m = x_m + x_v_broadcast 
 
-        for conv in self.mpmt_layers:
-            x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) + x_m
+        for conv, norm in zip(self.mpmt_layers, self.mpmt_norms):
+            update = conv(x_m, mpmt_edges)
+            x_m = norm(
+                x_m
+                + F.dropout(
+                    F.gelu(update),
+                    p=self.dropout,
+                    training=self.training,
+                )
+            )
+
+        # for conv in self.mpmt_layers:
+        #     x_m = F.dropout(F.relu(conv(x_m, mpmt_edges)),p=self.dropout, training=self.training) + x_m
 
         # out = global_add_pool(x_m, data['mpmt'].batch)
         # return out
@@ -195,30 +250,68 @@ class Decoder(nn.Module):
 #         output = self.decoder(enc_all_outputs,batch)
 
 #         return output
-    
 class CrossAttnDecoder(nn.Module):
-    def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
+    def __init__(
+        self,
+        h_feat_dec,
+        num_output_channels=3,
+        num_slots=2,
+        num_heads=4,
+        num_layers=3,
+        dropout=0.1,
+    ):
         super().__init__()
-        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
-        self.self_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)  # NEW
-        self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
+
+        self.num_slots = num_slots
+
+        self.slot_queries = nn.Parameter(
+            torch.randn(num_slots, h_feat_dec) * 0.02
+        )
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=h_feat_dec,
+            nhead=num_heads,
+            dim_feedforward=4 * h_feat_dec,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer,
+            num_layers=num_layers,
+            norm=nn.LayerNorm(h_feat_dec),
+        )
+
+        # Shared head across slots
         self.head = nn.Sequential(
-            nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels)
+            nn.LayerNorm(h_feat_dec),
+            nn.Linear(h_feat_dec, h_feat_dec),
+            nn.GELU(),
+            nn.Linear(h_feat_dec, num_output_channels),
         )
 
     def forward(self, x_m, batch):
+        # x_dense: [B, N_mpmt, H]
+        # mask: [B, N_mpmt], True for real nodes
         x_dense, mask = to_dense_batch(x_m, batch)
-        B = x_dense.size(0)
-        key_padding_mask = ~mask
 
-        q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
-        q_self, _ = self.self_attn(q, q, q)          # NEW: slots attend to each other first
-        attended, _ = self.cross_attn(q_self, x_dense, x_dense, key_padding_mask=key_padding_mask)
+        batch_size = x_dense.size(0)
 
-        B, S, H = attended.shape
-        out = self.head(attended.reshape(B * S, H))
-        return out.reshape(B, S, -1)
-    
+        queries = self.slot_queries.unsqueeze(0).expand(
+            batch_size, -1, -1
+        )
+
+        decoded = self.decoder(
+            tgt=queries,
+            memory=x_dense,
+            memory_key_padding_mask=~mask,
+        )
+
+        # Shared head operates directly over [B, S, H]
+        return self.head(decoded)
+        
 class EncoderDecoder(nn.Module):
     def __init__(self, encoder, decoder):
         super().__init__()
