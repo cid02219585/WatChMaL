@@ -135,25 +135,25 @@ class Decoder(nn.Module):
         out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
         return out
 
-class CrossAttnDecoder(nn.Module):
-    def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
-        super().__init__()
-        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
-        self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
-        self.heads = nn.ModuleList([
-            nn.Sequential(nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels))
-            for _ in range(num_slots)
-        ])
+# class CrossAttnDecoder(nn.Module):
+#     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
+#         super().__init__()
+#         self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
+#         self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
+#         self.heads = nn.ModuleList([
+#             nn.Sequential(nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels))
+#             for _ in range(num_slots)
+#         ])
 
-    def forward(self, x_m, batch):
-        x_dense, mask = to_dense_batch(x_m, batch)  
-        B = x_dense.size(0)
-        key_padding_mask = ~mask
+#     def forward(self, x_m, batch):
+#         x_dense, mask = to_dense_batch(x_m, batch)  
+#         B = x_dense.size(0)
+#         key_padding_mask = ~mask
 
-        q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
-        attended, _ = self.cross_attn(q, x_dense, x_dense, key_padding_mask=key_padding_mask)
+#         q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
+#         attended, _ = self.cross_attn(q, x_dense, x_dense, key_padding_mask=key_padding_mask)
 
-        return torch.stack([h(attended[:, i, :]) for i, h in enumerate(self.heads)], dim=1)
+#         return torch.stack([h(attended[:, i, :]) for i, h in enumerate(self.heads)], dim=1)
     
 # class CrossAttnDecoder(nn.Module):
 #     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
@@ -183,18 +183,41 @@ class CrossAttnDecoder(nn.Module):
 #         out = self.head(flat)                     # (B*S, num_output_channels)
 #         return out.reshape(B, S, -1)               # (B, num_slots, num_output_channels)
     
-class EncoderDecoder(nn.Module):
-    """The base class for the encoder--decoder architecture."""
-    def __init__(self, encoder, decoder):
+# class EncoderDecoder(nn.Module):
+#     """The base class for the encoder--decoder architecture."""
+#     def __init__(self, encoder, decoder):
+#         super().__init__()
+#         self.encoder = encoder
+#         self.decoder = decoder
+
+#     def forward(self, data):
+#         enc_all_outputs,batch = self.encoder(data)
+#         output = self.decoder(enc_all_outputs,batch)
+
+#         return output
+    
+class CrossAttnDecoder(nn.Module):
+    def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
         super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
+        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
+        self.self_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)  # NEW
+        self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
+        self.head = nn.Sequential(
+            nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels)
+        )
 
-    def forward(self, data):
-        enc_all_outputs,batch = self.encoder(data)
-        output = self.decoder(enc_all_outputs,batch)
+    def forward(self, x_m, batch):
+        x_dense, mask = to_dense_batch(x_m, batch)
+        B = x_dense.size(0)
+        key_padding_mask = ~mask
 
-        return output
+        q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
+        q_self, _ = self.self_attn(q, q, q)          # NEW: slots attend to each other first
+        attended, _ = self.cross_attn(q_self, x_dense, x_dense, key_padding_mask=key_padding_mask)
+
+        B, S, H = attended.shape
+        out = self.head(attended.reshape(B * S, H))
+        return out.reshape(B, S, -1)
     
 # class EncoderDecoder(nn.Module):
 #     def __init__(self, encoder, decoder):

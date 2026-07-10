@@ -181,24 +181,24 @@ class Decoder(nn.Module):
         out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
         return out
 
-class CrossAttnDecoder(nn.Module):
-    def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
-        super().__init__()
-        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
-        self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
-        self.heads = nn.ModuleList([
-            nn.Sequential(nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels))
-            for _ in range(num_slots)
-        ])
+# class CrossAttnDecoder(nn.Module):
+#     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
+#         super().__init__()
+#         self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
+#         self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
+#         self.heads = nn.ModuleList([
+#             nn.Sequential(nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels))
+#             for _ in range(num_slots)
+#         ])
 
-    def forward(self, feat_map):
-        B, C, H, W = feat_map.shape
-        tokens = feat_map.flatten(2).transpose(1, 2) 
+#     def forward(self, feat_map):
+#         B, C, H, W = feat_map.shape
+#         tokens = feat_map.flatten(2).transpose(1, 2) 
 
-        q = self.slot_queries.unsqueeze(0).expand(B, -1, -1) 
-        attended, _ = self.cross_attn(q, tokens, tokens)   
+#         q = self.slot_queries.unsqueeze(0).expand(B, -1, -1) 
+#         attended, _ = self.cross_attn(q, tokens, tokens)   
 
-        return torch.stack([h(attended[:, i, :]) for i, h in enumerate(self.heads)], dim=1)
+#         return torch.stack([h(attended[:, i, :]) for i, h in enumerate(self.heads)], dim=1)
     
 # class CrossAttnDecoder(nn.Module):
 #     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
@@ -225,6 +225,29 @@ class CrossAttnDecoder(nn.Module):
 #         flat = attended.reshape(B * S, Hc)
 #         out = self.head(flat)                # (B*S, num_output_channels)
 #         return out.reshape(B, S, -1)          # (B, num_slots, num_output_channels)
+
+class CrossAttnDecoder(nn.Module):
+    def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
+        super().__init__()
+        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
+        self.self_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
+        self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
+        self.head = nn.Sequential(
+            nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels)
+        )
+
+    def forward(self, feat_map):
+        B, C, H, W = feat_map.shape
+        tokens = feat_map.flatten(2).transpose(1, 2)  # (B, H*W, C)
+
+        q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)  # (B, num_slots, C)
+        q_self, _ = self.self_attn(q, q, q)
+        attended, _ = self.cross_attn(q_self, tokens, tokens)      # <-- fixed: use q_self here
+
+        B, S, Hc = attended.shape
+        flat = attended.reshape(B * S, Hc)
+        out = self.head(flat)
+        return out.reshape(B, S, -1)
     
 class EncoderDecoder(nn.Module):
     """The base class for the encoder--decoder architecture."""
