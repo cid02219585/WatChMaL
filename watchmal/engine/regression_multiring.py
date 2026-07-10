@@ -81,6 +81,7 @@ class RegressionEngine(ReconstructionEngine):
         self.target_dict = None
         self.stacked_target = None
         self.predictions = None
+        self.warmup_iterations = 500
 
     # def process_target(self, data):
     #     """Extract the event data and target from the input data dict"""
