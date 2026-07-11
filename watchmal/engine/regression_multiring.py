@@ -271,83 +271,115 @@ class RegressionEngine(ReconstructionEngine):
 
     #     return metrics
 
+    # def compute_metrics(self):
+    #     B = self.model_out.shape[0]
+    #     w_pos = 1.0 / 100.0**2
+    #     w_dir = 1.0
+    #     w_energy = 1.0
+
+    #     pred_dict = {t: self.predictions["predicted_" + t] for t in self.target_key}
+    #     true_dict = self.target_dict  # each (B, num_slots, d_t)
+
+    #     def per_ring_loss(pred_d, true_d):
+    #         pos_loss = ((pred_d["positions"] - true_d["positions"]) ** 2).mean(dim=-1)
+
+    #         pred_dir = pred_d["directions"]
+    #         true_dir = true_d["directions"]
+    #         pred_dir_n = pred_dir / (torch.linalg.vector_norm(pred_dir, dim=-1, keepdim=True) + 1e-8)
+    #         true_dir_n = true_dir / (torch.linalg.vector_norm(true_dir, dim=-1, keepdim=True) + 1e-8)
+    #         dir_loss = 1.0 - torch.sum(pred_dir_n * true_dir_n, dim=-1)
+
+    #         pred_e = torch.clamp(pred_d["energies"].squeeze(-1), min=1e-3)
+    #         true_e = torch.clamp(true_d["energies"].squeeze(-1), min=1e-3)
+    #         energy_loss = (torch.log(pred_e) - torch.log(true_e)) ** 2
+
+    #         total = w_pos * pos_loss + w_dir * dir_loss + w_energy * energy_loss
+    #         components = {"pos_loss": pos_loss, "dir_loss": dir_loss, "energy_loss": energy_loss}
+    #         return total, components
+
+    #     straight_loss, straight_components = per_ring_loss(pred_dict, true_dict)
+
+    #     true_dict_swapped = {t: v.flip(dims=[1]) for t, v in true_dict.items()}
+    #     swapped_loss, _ = per_ring_loss(pred_dict, true_dict_swapped)
+
+    #     straight_total = straight_loss.sum(dim=-1)  # (B,)
+    #     swapped_total = swapped_loss.sum(dim=-1)    # (B,)
+
+    #     # Warm-up: matching against near-random predictions is unstable, so use
+    #     # fixed ("straight") assignment for the first warmup_iterations.
+    #     if self.iteration < self.warmup_iterations:
+    #         use_swapped = torch.zeros(B, dtype=torch.bool, device=self.device)
+    #     else:
+    #         use_swapped = swapped_total < straight_total
+
+    #     matched_total = torch.where(use_swapped, swapped_total, straight_total)
+    #     self.loss = matched_total.mean()
+
+    #     metrics = {
+    #         "loss": self.loss,
+    #         "straight_loss": straight_total.mean(),
+    #         "swapped_loss": swapped_total.mean(),
+    #         "swap_fraction": use_swapped.float().mean(),
+    #         "straight_pos_loss": straight_components["pos_loss"].mean(),
+    #         "straight_dir_loss": straight_components["dir_loss"].mean(),
+    #         "straight_energy_loss": straight_components["energy_loss"].mean(),
+    #     }
+
+    #     # Build matched targets (using the clean torch.where pattern) for per-target metrics
+    #     use_swapped_view = use_swapped.detach().view(B, 1, 1)
+    #     for t, v in true_dict.items():
+    #         matched_v = torch.where(use_swapped_view, v.flip(dims=[1]), v)
+    #         pred_t = pred_dict[t]
+
+    #         if t == "positions":
+    #             position_error = torch.linalg.vector_norm(pred_t - matched_v, dim=-1)
+    #             metrics["position_error_slot0"] = position_error[:, 0].mean()
+    #             metrics["position_error_slot1"] = position_error[:, 1].mean()
+    #             metrics["mean_position_error"] = position_error.mean()
+    #         elif t in metric_functions:
+    #             for i in range(matched_v.shape[1]):
+    #                 for k, m in metric_functions[t](pred_t[:, i], matched_v[:, i]).items():
+    #                     metrics[f"{k}_slot{i}"] = m.reshape(())
+
+    #     metrics["predicted_slot_separation"] = torch.linalg.vector_norm(
+    #         pred_dict["positions"][:, 0] - pred_dict["positions"][:, 1], dim=-1
+    #     ).mean()
+    #     metrics["true_slot_separation"] = torch.linalg.vector_norm(
+    #         true_dict["positions"][:, 0] - true_dict["positions"][:, 1], dim=-1
+    #     ).mean()
+
+    #     return metrics
+        
     def compute_metrics(self):
-        B = self.model_out.shape[0]
-        w_pos = 1.0 / 100.0**2
-        w_dir = 1.0
-        w_energy = 1.0
+        pred_positions = self.predictions["predicted_positions"]
+        true_positions = self.target_dict["positions"]
 
-        pred_dict = {t: self.predictions["predicted_" + t] for t in self.target_key}
-        true_dict = self.target_dict  # each (B, num_slots, d_t)
+        # Fixed energy-derived ordering; no matching during this diagnostic.
+        per_slot_loss = (
+            (pred_positions - true_positions) ** 2
+        ).mean(dim=-1)
 
-        def per_ring_loss(pred_d, true_d):
-            pos_loss = ((pred_d["positions"] - true_d["positions"]) ** 2).mean(dim=-1)
+        self.loss = per_slot_loss.sum(dim=-1).mean()
 
-            pred_dir = pred_d["directions"]
-            true_dir = true_d["directions"]
-            pred_dir_n = pred_dir / (torch.linalg.vector_norm(pred_dir, dim=-1, keepdim=True) + 1e-8)
-            true_dir_n = true_dir / (torch.linalg.vector_norm(true_dir, dim=-1, keepdim=True) + 1e-8)
-            dir_loss = 1.0 - torch.sum(pred_dir_n * true_dir_n, dim=-1)
-
-            pred_e = torch.clamp(pred_d["energies"].squeeze(-1), min=1e-3)
-            true_e = torch.clamp(true_d["energies"].squeeze(-1), min=1e-3)
-            energy_loss = (torch.log(pred_e) - torch.log(true_e)) ** 2
-
-            total = w_pos * pos_loss + w_dir * dir_loss + w_energy * energy_loss
-            components = {"pos_loss": pos_loss, "dir_loss": dir_loss, "energy_loss": energy_loss}
-            return total, components
-
-        straight_loss, straight_components = per_ring_loss(pred_dict, true_dict)
-
-        true_dict_swapped = {t: v.flip(dims=[1]) for t, v in true_dict.items()}
-        swapped_loss, _ = per_ring_loss(pred_dict, true_dict_swapped)
-
-        straight_total = straight_loss.sum(dim=-1)  # (B,)
-        swapped_total = swapped_loss.sum(dim=-1)    # (B,)
-
-        # Warm-up: matching against near-random predictions is unstable, so use
-        # fixed ("straight") assignment for the first warmup_iterations.
-        if self.iteration < self.warmup_iterations:
-            use_swapped = torch.zeros(B, dtype=torch.bool, device=self.device)
-        else:
-            use_swapped = swapped_total < straight_total
-
-        matched_total = torch.where(use_swapped, swapped_total, straight_total)
-        self.loss = matched_total.mean()
+        position_error = torch.linalg.vector_norm(
+            pred_positions - true_positions,
+            dim=-1,
+        )
 
         metrics = {
             "loss": self.loss,
-            "straight_loss": straight_total.mean(),
-            "swapped_loss": swapped_total.mean(),
-            "swap_fraction": use_swapped.float().mean(),
-            "straight_pos_loss": straight_components["pos_loss"].mean(),
-            "straight_dir_loss": straight_components["dir_loss"].mean(),
-            "straight_energy_loss": straight_components["energy_loss"].mean(),
+            "position_error_slot0": position_error[:, 0].mean(),
+            "position_error_slot1": position_error[:, 1].mean(),
+            "mean_position_error": position_error.mean(),
+            "predicted_slot_separation": torch.linalg.vector_norm(
+                pred_positions[:, 0] - pred_positions[:, 1],
+                dim=-1,
+            ).mean(),
+            "true_slot_separation": torch.linalg.vector_norm(
+                true_positions[:, 0] - true_positions[:, 1],
+                dim=-1,
+            ).mean(),
         }
-
-        # Build matched targets (using the clean torch.where pattern) for per-target metrics
-        use_swapped_view = use_swapped.detach().view(B, 1, 1)
-        for t, v in true_dict.items():
-            matched_v = torch.where(use_swapped_view, v.flip(dims=[1]), v)
-            pred_t = pred_dict[t]
-
-            if t == "positions":
-                position_error = torch.linalg.vector_norm(pred_t - matched_v, dim=-1)
-                metrics["position_error_slot0"] = position_error[:, 0].mean()
-                metrics["position_error_slot1"] = position_error[:, 1].mean()
-                metrics["mean_position_error"] = position_error.mean()
-            elif t in metric_functions:
-                for i in range(matched_v.shape[1]):
-                    for k, m in metric_functions[t](pred_t[:, i], matched_v[:, i]).items():
-                        metrics[f"{k}_slot{i}"] = m.reshape(())
-
-        # Diagnostic: are the two predicted positions collapsing together?
-        metrics["predicted_slot_separation"] = torch.linalg.vector_norm(
-            pred_dict["positions"][:, 0] - pred_dict["positions"][:, 1], dim=-1
-        ).mean()
-        metrics["true_slot_separation"] = torch.linalg.vector_norm(
-            true_dict["positions"][:, 0] - true_dict["positions"][:, 1], dim=-1
-        ).mean()
 
         return metrics
     def save_state(self, suffix="", name=None):
