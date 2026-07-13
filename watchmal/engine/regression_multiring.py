@@ -350,27 +350,72 @@ class RegressionEngine(ReconstructionEngine):
 
     #     return metrics
         
+    # def compute_metrics(self):
+    #     pred_positions = self.predictions["predicted_positions"]
+    #     true_positions = self.target_dict["positions"]
+
+    #     # Fixed energy-derived ordering; no matching during this diagnostic.
+    #     per_slot_loss = (
+    #         (pred_positions - true_positions) ** 2
+    #     ).mean(dim=-1)
+
+    #     self.loss = per_slot_loss.sum(dim=-1).mean()
+
+    #     position_error = torch.linalg.vector_norm(
+    #         pred_positions - true_positions,
+    #         dim=-1,
+    #     )
+
+    #     metrics = {
+    #         "loss": self.loss,
+    #         "position_error_slot0": position_error[:, 0].mean(),
+    #         "position_error_slot1": position_error[:, 1].mean(),
+    #         "mean_position_error": position_error.mean(),
+    #         "predicted_slot_separation": torch.linalg.vector_norm(
+    #             pred_positions[:, 0] - pred_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #         "true_slot_separation": torch.linalg.vector_norm(
+    #             true_positions[:, 0] - true_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #     }
+
+    #     return metrics
+
+
+
+    ## ok for two slots
+
     def compute_metrics(self):
-        pred_positions = self.predictions["predicted_positions"]
+        pred_positions = self.predictions["predicted_positions"] 
         true_positions = self.target_dict["positions"]
 
-        # Fixed energy-derived ordering; no matching during this diagnostic.
-        per_slot_loss = (
-            (pred_positions - true_positions) ** 2
-        ).mean(dim=-1)
+        cost = (
+            (pred_positions.unsqueeze(2) - true_positions.unsqueeze(1)) ** 2
+        ).mean(dim=-1) 
 
-        self.loss = per_slot_loss.sum(dim=-1).mean()
+        identity_cost = cost[:, 0, 0] + cost[:, 1, 1] 
+        swap_cost = cost[:, 0, 1] + cost[:, 1, 0] 
+
+        use_swap = swap_cost < identity_cost 
+        per_event_loss = torch.where(use_swap, swap_cost, identity_cost)
+        self.loss = per_event_loss.mean()
+
+        matched_true = true_positions.clone()
+        matched_true[use_swap] = true_positions[use_swap].flip(dims=[1])
 
         position_error = torch.linalg.vector_norm(
-            pred_positions - true_positions,
+            pred_positions - matched_true,
             dim=-1,
-        )
+        ) 
 
         metrics = {
             "loss": self.loss,
             "position_error_slot0": position_error[:, 0].mean(),
             "position_error_slot1": position_error[:, 1].mean(),
             "mean_position_error": position_error.mean(),
+            "swap_fraction": use_swap.float().mean(),
             "predicted_slot_separation": torch.linalg.vector_norm(
                 pred_positions[:, 0] - pred_positions[:, 1],
                 dim=-1,
@@ -382,6 +427,7 @@ class RegressionEngine(ReconstructionEngine):
         }
 
         return metrics
+
     def save_state(self, suffix="", name=None):
         self.state_data["target_sizes"] = self.target_sizes
         super().save_state(suffix, name)
