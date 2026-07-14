@@ -386,20 +386,77 @@ class RegressionEngine(ReconstructionEngine):
 
 
     ## ok for two slots
-    def compute_metrics(self):
-        true_positions = self.target_dict["positions"]
-        pred_positions = self.predictions["predicted_positions"]
+    # def compute_metrics(self):
+    #     true_positions = self.target_dict["positions"]
+    #     pred_positions = self.predictions["predicted_positions"]
 
+    #     pred_scaled = self.model_out
+    #     true_scaled = self.stacked_target
+
+    #     cost = (
+    #         pred_scaled.unsqueeze(2)
+    #         - true_scaled.unsqueeze(1)
+    #     ).square().mean(dim=-1)
+
+    #     identity_cost = cost[:, 0, 0] + cost[:, 1, 1]
+    #     swap_cost = cost[:, 0, 1] + cost[:, 1, 0]
+
+    #     use_swap = swap_cost < identity_cost
+
+    #     self.loss = torch.where(
+    #         use_swap,
+    #         swap_cost,
+    #         identity_cost,
+    #     ).mean()
+
+    #     # Match targets in physical units for reporting metrics.
+    #     matched_true = true_positions.clone()
+    #     matched_true[use_swap] = true_positions[use_swap].flip(dims=[1])
+
+    #     position_error = torch.linalg.vector_norm(
+    #         pred_positions - matched_true,
+    #         dim=-1,
+    #     )
+
+    #     metrics = {
+    #         "loss": self.loss,
+    #         "position_error_slot0": position_error[:, 0].mean(),
+    #         "position_error_slot1": position_error[:, 1].mean(),
+    #         "mean_position_error": position_error.mean(),
+    #         "swap_fraction": use_swap.float().mean(),
+    #         "predicted_slot_separation": torch.linalg.vector_norm(
+    #             pred_positions[:, 0] - pred_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #         "true_slot_separation": torch.linalg.vector_norm(
+    #             true_positions[:, 0] - true_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #     }
+
+    #     return metrics
+
+### huber
+    def compute_metrics(self):
         pred_scaled = self.model_out
         true_scaled = self.stacked_target
 
-        cost = (
-            pred_scaled.unsqueeze(2)
-            - true_scaled.unsqueeze(1)
-        ).square().mean(dim=-1)
+        pairwise_cost = F.huber_loss(
+            pred_scaled.unsqueeze(2),
+            true_scaled.unsqueeze(1),
+            delta=self.criterion.delta,
+            reduction="none",
+        ).mean(dim=-1)
 
-        identity_cost = cost[:, 0, 0] + cost[:, 1, 1]
-        swap_cost = cost[:, 0, 1] + cost[:, 1, 0]
+        identity_cost = (
+            pairwise_cost[:, 0, 0]
+            + pairwise_cost[:, 1, 1]
+        )
+
+        swap_cost = (
+            pairwise_cost[:, 0, 1]
+            + pairwise_cost[:, 1, 0]
+        )
 
         use_swap = swap_cost < identity_cost
 
@@ -409,16 +466,21 @@ class RegressionEngine(ReconstructionEngine):
             identity_cost,
         ).mean()
 
-        # Match targets in physical units for reporting metrics.
-        matched_true = true_positions.clone()
-        matched_true[use_swap] = true_positions[use_swap].flip(dims=[1])
+        pred_positions = self.predictions["predicted_positions"]
+        true_positions = self.target_dict["positions"]
+
+        matched_true = torch.where(
+            use_swap[:, None, None],
+            true_positions.flip(dims=[1]),
+            true_positions,
+        )
 
         position_error = torch.linalg.vector_norm(
             pred_positions - matched_true,
             dim=-1,
         )
 
-        metrics = {
+        return {
             "loss": self.loss,
             "position_error_slot0": position_error[:, 0].mean(),
             "position_error_slot1": position_error[:, 1].mean(),
@@ -433,8 +495,6 @@ class RegressionEngine(ReconstructionEngine):
                 dim=-1,
             ).mean(),
         }
-
-        return metrics
 
     def save_state(self, suffix="", name=None):
         self.state_data["target_sizes"] = self.target_sizes
