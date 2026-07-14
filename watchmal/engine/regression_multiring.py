@@ -388,17 +388,23 @@ class RegressionEngine(ReconstructionEngine):
     ## ok for two slots
 
     def compute_metrics(self):
-        pred_positions = self.predictions["predicted_positions"] 
+        # pred_positions = self.predictions["predicted_positions"] 
         true_positions = self.target_dict["positions"]
 
+        true_positions_scaled = true_positions / 100.0
+        pred_positions_scaled = self.predictions["predicted_positions"]
+
         cost = (
-            (pred_positions.unsqueeze(2) - true_positions.unsqueeze(1)) ** 2
+            (pred_positions_scaled.unsqueeze(2) - true_positions_scaled.unsqueeze(1)) ** 2
         ).mean(dim=-1) 
 
         identity_cost = cost[:, 0, 0] + cost[:, 1, 1] 
         swap_cost = cost[:, 0, 1] + cost[:, 1, 0] 
 
         use_swap = swap_cost < identity_cost 
+
+        pred_positions = pred_positions_scaled * 100.0
+
         per_event_loss = torch.where(use_swap, swap_cost, identity_cost)
         self.loss = per_event_loss.mean()
 

@@ -299,8 +299,6 @@ class HierTrans(nn.Module):
         x_v_broadcast = self.virtual_norm(x_v[data['mpmt'].batch])  # normalise virtual
         x_m = x_m + x_v_broadcast 
 
-
-
         # x_m = x_m + self.attends_to_conv((x_v, x_m), attends_to)
 
         for conv in self.mpmt_layers:
