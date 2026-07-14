@@ -386,35 +386,37 @@ class RegressionEngine(ReconstructionEngine):
 
 
     ## ok for two slots
-
     def compute_metrics(self):
-        # pred_positions = self.predictions["predicted_positions"] 
         true_positions = self.target_dict["positions"]
+        pred_positions = self.predictions["predicted_positions"]
 
-        true_positions_scaled = true_positions / 100.0
-        pred_positions_scaled = self.predictions["predicted_positions"]
+        pred_scaled = self.model_out
+        true_scaled = self.stacked_target
 
         cost = (
-            (pred_positions_scaled.unsqueeze(2) - true_positions_scaled.unsqueeze(1)) ** 2
-        ).mean(dim=-1) 
+            pred_scaled.unsqueeze(2)
+            - true_scaled.unsqueeze(1)
+        ).square().mean(dim=-1)
 
-        identity_cost = cost[:, 0, 0] + cost[:, 1, 1] 
-        swap_cost = cost[:, 0, 1] + cost[:, 1, 0] 
+        identity_cost = cost[:, 0, 0] + cost[:, 1, 1]
+        swap_cost = cost[:, 0, 1] + cost[:, 1, 0]
 
-        use_swap = swap_cost < identity_cost 
+        use_swap = swap_cost < identity_cost
 
-        pred_positions = pred_positions_scaled * 100.0
+        self.loss = torch.where(
+            use_swap,
+            swap_cost,
+            identity_cost,
+        ).mean()
 
-        per_event_loss = torch.where(use_swap, swap_cost, identity_cost)
-        self.loss = per_event_loss.mean()
-
+        # Match targets in physical units for reporting metrics.
         matched_true = true_positions.clone()
         matched_true[use_swap] = true_positions[use_swap].flip(dims=[1])
 
         position_error = torch.linalg.vector_norm(
             pred_positions - matched_true,
             dim=-1,
-        ) 
+        )
 
         metrics = {
             "loss": self.loss,
