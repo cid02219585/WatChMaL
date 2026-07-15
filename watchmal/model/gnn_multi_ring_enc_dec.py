@@ -190,6 +190,48 @@ class Decoder(nn.Module):
         out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
         return out
 
+# class CrossAttnDecoder(nn.Module):
+#     def __init__(
+#         self,
+#         h_feat_dec,
+#         num_output_channels=3,
+#         num_slots=2,
+#         num_heads=4,
+#         num_layers=3,
+#         dropout=0.1,
+#     ):
+#         super().__init__()
+
+#         self.num_slots = num_slots
+
+#         self.slot_queries = nn.Parameter(
+#             torch.randn(num_slots, h_feat_dec) * 0.02
+#         )
+
+#         decoder_layer = nn.TransformerDecoderLayer(
+#             d_model=h_feat_dec,
+#             nhead=num_heads,
+#             dim_feedforward=4 * h_feat_dec,
+#             dropout=dropout,
+#             activation="gelu",
+#             batch_first=True,
+#             norm_first=True,
+#         )
+
+#         self.decoder = nn.TransformerDecoder(
+#             decoder_layer,
+#             num_layers=num_layers,
+#             norm=nn.LayerNorm(h_feat_dec),
+#         )
+
+#         # Shared head across slots
+#         self.head = nn.Sequential(
+#             nn.LayerNorm(h_feat_dec),
+#             nn.Linear(h_feat_dec, h_feat_dec),
+#             nn.GELU(),
+#             nn.Linear(h_feat_dec, num_output_channels),
+#         )
+
 class CrossAttnDecoder(nn.Module):
     def __init__(
         self,
@@ -224,17 +266,38 @@ class CrossAttnDecoder(nn.Module):
             norm=nn.LayerNorm(h_feat_dec),
         )
 
-        # Shared head across slots
-        self.head = nn.Sequential(
-            nn.LayerNorm(h_feat_dec),
-            nn.Linear(h_feat_dec, h_feat_dec),
-            nn.GELU(),
-            nn.Linear(h_feat_dec, num_output_channels),
+        self.heads = nn.ModuleList([
+            nn.Sequential(
+                nn.LayerNorm(h_feat_dec),
+                nn.Linear(h_feat_dec, h_feat_dec),
+                nn.GELU(),
+                nn.Linear(h_feat_dec, num_output_channels),
+            )
+            for _ in range(num_slots)
+        ])
+
+    def forward(self, x_m, batch):
+        x_dense, mask = to_dense_batch(x_m, batch)
+
+        queries = self.slot_queries.unsqueeze(0).expand(
+            x_dense.size(0), -1, -1
+        )
+
+        decoded = self.decoder(
+            tgt=queries,
+            memory=x_dense,
+            memory_key_padding_mask=~mask,
+        )
+
+        return torch.stack(
+            [
+                self.heads[i](decoded[:, i])
+                for i in range(self.num_slots)
+            ],
+            dim=1,
         )
 
     def forward(self, x_m, batch):
-        # x_dense: [B, N_mpmt, H]
-        # mask: [B, N_mpmt], True for real nodes
         x_dense, mask = to_dense_batch(x_m, batch)
 
         batch_size = x_dense.size(0)
@@ -249,9 +312,8 @@ class CrossAttnDecoder(nn.Module):
             memory_key_padding_mask=~mask,
         )
 
-        # Shared head operates directly over [B, S, H]
         return self.head(decoded)
-        
+    
 class EncoderDecoder(nn.Module):
     def __init__(self, encoder, decoder):
         super().__init__()
