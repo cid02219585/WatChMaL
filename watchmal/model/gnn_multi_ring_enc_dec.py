@@ -231,6 +231,22 @@ class Decoder(nn.Module):
 #             nn.GELU(),
 #             nn.Linear(h_feat_dec, num_output_channels),
 #         )
+    # def forward(self, x_m, batch):
+    #     x_dense, mask = to_dense_batch(x_m, batch)
+
+    #     batch_size = x_dense.size(0)
+
+    #     queries = self.slot_queries.unsqueeze(0).expand(
+    #         batch_size, -1, -1
+    #     )
+
+    #     decoded = self.decoder(
+    #         tgt=queries,
+    #         memory=x_dense,
+    #         memory_key_padding_mask=~mask,
+    #     )
+
+    #     return self.head(decoded)
 
 class CrossAttnDecoder(nn.Module):
     def __init__(
@@ -296,23 +312,6 @@ class CrossAttnDecoder(nn.Module):
             ],
             dim=1,
         )
-
-    def forward(self, x_m, batch):
-        x_dense, mask = to_dense_batch(x_m, batch)
-
-        batch_size = x_dense.size(0)
-
-        queries = self.slot_queries.unsqueeze(0).expand(
-            batch_size, -1, -1
-        )
-
-        decoded = self.decoder(
-            tgt=queries,
-            memory=x_dense,
-            memory_key_padding_mask=~mask,
-        )
-
-        return self.head(decoded)
     
 class EncoderDecoder(nn.Module):
     def __init__(self, encoder, decoder):

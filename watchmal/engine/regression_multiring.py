@@ -442,36 +442,36 @@ class RegressionEngine(ReconstructionEngine):
         pred_scaled = self.model_out
         true_scaled = self.stacked_target
 
-        # pairwise_cost = F.huber_loss(
-        #     pred_scaled.unsqueeze(2),
-        #     true_scaled.unsqueeze(1),
-        #     delta=self.criterion.delta,
-        #     reduction="none",
-        # ).mean(dim=-1)
-
-        num_pred_slots = pred_scaled.size(1)
-        num_true_slots = true_scaled.size(1)
-
-        pred_pairwise = pred_scaled.unsqueeze(2).expand(
-            -1,
-            num_pred_slots,
-            num_true_slots,
-            -1,
-        )
-
-        true_pairwise = true_scaled.unsqueeze(1).expand(
-            -1,
-            num_pred_slots,
-            num_true_slots,
-            -1,
-        )
-
         pairwise_cost = F.huber_loss(
-            pred_pairwise,
-            true_pairwise,
+            pred_scaled.unsqueeze(2),
+            true_scaled.unsqueeze(1),
             delta=self.criterion.delta,
             reduction="none",
         ).mean(dim=-1)
+
+        # num_pred_slots = pred_scaled.size(1)
+        # num_true_slots = true_scaled.size(1)
+
+        # pred_pairwise = pred_scaled.unsqueeze(2).expand(
+        #     -1,
+        #     num_pred_slots,
+        #     num_true_slots,
+        #     -1,
+        # )
+
+        # true_pairwise = true_scaled.unsqueeze(1).expand(
+        #     -1,
+        #     num_pred_slots,
+        #     num_true_slots,
+        #     -1,
+        # )
+
+        # pairwise_cost = F.huber_loss(
+        #     pred_pairwise,
+        #     true_pairwise,
+        #     delta=self.criterion.delta,
+        #     reduction="none",
+        # ).mean(dim=-1)
 
         identity_cost = (
             pairwise_cost[:, 0, 0]
