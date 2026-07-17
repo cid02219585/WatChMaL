@@ -6,6 +6,8 @@ from torch_geometric.nn import TransformerConv, HeteroConv, GATConv, GATv2Conv, 
 
 from torch_scatter import scatter_mean
 from torch_geometric.utils import to_dense_batch
+from typing import Callable
+import copy
 
 
 class NonHierGAT_encoder(nn.Module):
@@ -247,6 +249,261 @@ class CrossAttnDecoder(nn.Module):
         )
 
         return self.head(decoded)
+
+
+### writing it out so i can make chagnes
+
+
+
+## implemented  from pytorch
+# 
+# so i can edit details
+
+
+# def _get_seq_len(src: torch.Tensor, batch_first: bool) -> int | None:
+#     if src.is_nested:
+#         return None
+#     else:
+#         src_size = src.size()
+#         if len(src_size) == 2:
+#             # unbatched: S, E
+#             return src_size[0]
+#         else:
+#             # batched: B, S, E if batch_first else S, B, E
+#             seq_len_pos = 1 if batch_first else 0
+#             return src_size[seq_len_pos]
+
+
+def _get_clones(module, N):
+    # FIXME: copy.deepcopy() is not defined on nn.module
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
+# def _detect_is_causal_mask(
+#     mask: torch.Tensor | None,
+#     is_causal: bool | None = None,
+#     size: int | None = None,
+# ) -> bool:
+
+#     # Prevent type refinement
+#     make_causal = is_causal is True
+
+#     if is_causal is None and mask is not None:
+#         sz = size if size is not None else mask.size(-2)
+#         causal_comparison = _generate_square_subsequent_mask(
+#             sz, device=mask.device, dtype=mask.dtype
+#         )
+
+#         # Do not use `torch.equal` so we handle batched masks by
+#         # broadcasting the comparison.
+#         if mask.size() == causal_comparison.size():
+#             make_causal = bool((mask == causal_comparison).all())
+#         else:
+#             make_causal = False
+
+#     return make_causal
+
+
+class TransformerDecoder(nn.Module):
+    __constants__ = ["norm"]
+
+    def __init__(
+        self,
+        decoder_layer: "TransformerDecoderLayer",
+        num_layers: int,
+        norm: nn.Module | None = None,
+    ) -> None:
+        super().__init__()
+        # torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
+        self.layers = _get_clones(decoder_layer, num_layers)
+        self.num_layers = num_layers
+        self.norm = norm
+
+    def forward(
+        self,
+        tgt: torch.Tensor,
+        memory: torch.Tensor,
+        tgt_mask: torch.Tensor | None = None,
+        # memory_mask: torch.Tensor | None = None,
+        # tgt_key_padding_mask: torch.Tensor | None = None,
+        memory_key_padding_mask: torch.Tensor | None = None,
+        # tgt_is_causal: bool | None = None,
+        # memory_is_causal: bool = False,
+    ) -> torch.Tensor:
+        
+        output = tgt
+
+        # seq_len = _get_seq_len(tgt, self.layers[0].self_attn.batch_first)
+        # tgt_is_causal = _detect_is_causal_mask(tgt_mask, tgt_is_causal, seq_len)
+
+        for mod in self.layers:
+            output = mod(
+                output,
+                memory,
+                # tgt_mask=tgt_mask,
+                # memory_mask=memory_mask,
+                # tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+                # tgt_is_causal=tgt_is_causal,
+                # memory_is_causal=memory_is_causal,
+            )
+
+        if self.norm is not None:
+            output = self.norm(output)
+
+        return output
+
+class TransformerDecoderLayer(nn.Module):
+
+    __constants__ = ["norm_first"]
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        activation: str | Callable[[torch.Tensor], torch.Tensor] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            batch_first=batch_first,
+            bias=bias,
+            **factory_kwargs,
+        )
+        self.multihead_attn = nn.MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            batch_first=batch_first,
+            bias=bias,
+            **factory_kwargs,
+        )
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
+
+        self.norm_first = norm_first
+        self.norm1 = nn.LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm2 = nn.LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm3 = nn.LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        # # Legacy string support for activation function.
+        # if isinstance(activation, str):
+        #     self.activation = _get_activation_fn(activation)
+        # else:
+        #     self.activation = activation
+
+        if activation == "relu":
+            self.activation = F.relu
+        elif activation == "gelu":
+            self.activation = F.gelu
+        else:
+            self.activation = activation 
+
+    def __setstate__(self, state):
+        if "activation" not in state:
+            state["activation"] = F.relu
+        super().__setstate__(state)
+
+    def forward(
+        self,
+        tgt: torch.Tensor,
+        memory: torch.Tensor,
+        tgt_mask: torch.Tensor | None = None,
+        memory_mask: torch.Tensor | None = None,
+        tgt_key_padding_mask: torch.Tensor | None = None,
+        memory_key_padding_mask: torch.Tensor | None = None,
+        tgt_is_causal: bool = False,
+        memory_is_causal: bool = False,
+    ) -> torch.Tensor:
+
+        x = tgt
+        if self.norm_first:
+            x = x + self._sa_block(
+                self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
+            )
+            x = x + self._mha_block(
+                self.norm2(x),
+                memory,
+                memory_mask,
+                memory_key_padding_mask,
+                memory_is_causal,
+            )
+            x = x + self._ff_block(self.norm3(x))
+        else:
+            x = self.norm1(
+                x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal)
+            )
+            x = self.norm2(
+                x
+                + self._mha_block(
+                    x, memory, memory_mask, memory_key_padding_mask, memory_is_causal
+                )
+            )
+            x = self.norm3(x + self._ff_block(x))
+
+        return x
+
+    # self-attention block
+    def _sa_block(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None,
+        key_padding_mask: torch.Tensor | None,
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        x = self.self_attn(
+            x,
+            x,
+            x,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            is_causal=is_causal,
+            need_weights=False,
+        )[0]
+        return self.dropout1(x)
+
+    # multihead attention block
+    def _mha_block(
+        self,
+        x: torch.Tensor,
+        mem: torch.Tensor,
+        attn_mask: torch.Tensor | None,
+        key_padding_mask: torch.Tensor | None,
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        x = self.multihead_attn(
+            x,
+            mem,
+            mem,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            is_causal=is_causal,
+            need_weights=False,
+        )[0]
+        return self.dropout2(x)
+
+    # feed forward block
+    def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout3(x)
+
+
+
 
 # class CrossAttnDecoder(nn.Module):
 #     def __init__(
