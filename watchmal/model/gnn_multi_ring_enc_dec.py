@@ -408,9 +408,11 @@ class TransformerDecoder(nn.Module):
         query_pos: torch.Tensor | None = None,
         # tgt_is_causal: bool | None = None,
         # memory_is_causal: bool = False,
+        return_intermediate=False,
     ) -> torch.Tensor:
         
         output = tgt
+        intermediate = []
 
         # seq_len = _get_seq_len(tgt, self.layers[0].self_attn.batch_first)
         # tgt_is_causal = _detect_is_causal_mask(tgt_mask, tgt_is_causal, seq_len)
@@ -427,6 +429,11 @@ class TransformerDecoder(nn.Module):
                 # tgt_is_causal=tgt_is_causal,
                 # memory_is_causal=memory_is_causal,
             )
+            if return_intermediate:
+                intermediate.append(self.norm(output))
+                
+        if return_intermediate:
+            return torch.stack(intermediate) 
 
         if self.norm is not None:
             output = self.norm(output)
@@ -622,11 +629,12 @@ class CrossAttnDecoder(nn.Module):
         num_heads=4,
         num_layers=3,
         dropout=0.1,
+        aux_loss=True,
     ):
         super().__init__()
 
         self.num_slots = num_slots
-
+        self.aux_loss=aux_loss
         # self.slot_queries = nn.Parameter(
         #     torch.randn(num_slots, h_feat_dec) * 0.02
         # )
@@ -673,6 +681,7 @@ class CrossAttnDecoder(nn.Module):
             memory=x_dense,
             memory_key_padding_mask=~mask,#
             query_pos=query_pos, ## could amke it a flag
+            return_intermediate=self.aux_loss and self.training,
         )
 
         return self.head(decoded)
