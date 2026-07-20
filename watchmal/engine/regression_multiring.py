@@ -143,7 +143,16 @@ class RegressionEngine(ReconstructionEngine):
         # evaluate the model on the data
         self.model_out = self.model(self.data)
         # split the output for each target
-        split_model_out = torch.split(self.model_out, self.target_sizes, dim=-1) # along the last dim
+
+
+        # split_model_out = torch.split(self.model_out, self.target_sizes, dim=-1) # along the last dim
+        final_out = (
+            self.model_out[-1]
+            if (self.stacked_target is not None
+                and self.model_out.dim() == self.stacked_target.dim() + 1)
+            else self.model_out
+        )
+        split_model_out = torch.split(final_out, self.target_sizes, dim=-1) # along the last dim
 
         self.predictions = {"predicted_" + t: o* self.scale[t] + self.offset[t]
                         for t, o in zip(self.target_key, split_model_out)}
@@ -438,58 +447,119 @@ class RegressionEngine(ReconstructionEngine):
     #     return metrics
 
 ### huber
+    # def compute_metrics(self):
+    #     pred_scaled = self.model_out
+    #     true_scaled = self.stacked_target
+
+    #     pairwise_cost = F.huber_loss(
+    #         pred_scaled.unsqueeze(2),
+    #         true_scaled.unsqueeze(1),
+    #         delta=self.criterion.delta,
+    #         reduction="none",
+    #     ).mean(dim=-1)
+
+    #     # num_pred_slots = pred_scaled.size(1)
+    #     # num_true_slots = true_scaled.size(1)
+
+    #     # pred_pairwise = pred_scaled.unsqueeze(2).expand(
+    #     #     -1,
+    #     #     num_pred_slots,
+    #     #     num_true_slots,
+    #     #     -1,
+    #     # )
+
+    #     # true_pairwise = true_scaled.unsqueeze(1).expand(
+    #     #     -1,
+    #     #     num_pred_slots,
+    #     #     num_true_slots,
+    #     #     -1,
+    #     # )
+
+    #     # pairwise_cost = F.huber_loss(
+    #     #     pred_pairwise,
+    #     #     true_pairwise,
+    #     #     delta=self.criterion.delta,
+    #     #     reduction="none",
+    #     # ).mean(dim=-1)
+
+    #     identity_cost = (
+    #         pairwise_cost[:, 0, 0]
+    #         + pairwise_cost[:, 1, 1]
+    #     )
+
+    #     swap_cost = (
+    #         pairwise_cost[:, 0, 1]
+    #         + pairwise_cost[:, 1, 0]
+    #     )
+
+    #     use_swap = swap_cost < identity_cost
+
+    #     self.loss = torch.where(
+    #         use_swap,
+    #         swap_cost,
+    #         identity_cost,
+    #     ).mean()
+
+    #     pred_positions = self.predictions["predicted_positions"]
+    #     true_positions = self.target_dict["positions"]
+
+    #     matched_true = torch.where(
+    #         use_swap[:, None, None],
+    #         true_positions.flip(dims=[1]),
+    #         true_positions,
+    #     )
+
+    #     position_error = torch.linalg.vector_norm(
+    #         pred_positions - matched_true,
+    #         dim=-1,
+    #     )
+
+    #     return {
+    #         "loss": self.loss,
+    #         "position_error_slot0": position_error[:, 0].mean(),
+    #         "position_error_slot1": position_error[:, 1].mean(),
+    #         "mean_position_error": position_error.mean(),
+    #         "swap_fraction": use_swap.float().mean(),
+    #         "predicted_slot_separation": torch.linalg.vector_norm(
+    #             pred_positions[:, 0] - pred_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #         "true_slot_separation": torch.linalg.vector_norm(
+    #             true_positions[:, 0] - true_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #     }
+
+
+## aux loss
+
     def compute_metrics(self):
-        pred_scaled = self.model_out
         true_scaled = self.stacked_target
 
-        pairwise_cost = F.huber_loss(
-            pred_scaled.unsqueeze(2),
-            true_scaled.unsqueeze(1),
-            delta=self.criterion.delta,
-            reduction="none",
-        ).mean(dim=-1)
+        if self.model_out.dim() == true_scaled.dim() + 1:
+            per_layer_preds = list(self.model_out)        # L tensors of (B, S, C)
+        else:
+            per_layer_preds = [self.model_out]
 
-        # num_pred_slots = pred_scaled.size(1)
-        # num_true_slots = true_scaled.size(1)
+        layer_losses = []
+        for pred_scaled in per_layer_preds:
+            pairwise_cost = F.huber_loss(
+                pred_scaled.unsqueeze(2),
+                true_scaled.unsqueeze(1),
+                delta=self.criterion.delta,
+                reduction="none",
+            ).mean(dim=-1)
 
-        # pred_pairwise = pred_scaled.unsqueeze(2).expand(
-        #     -1,
-        #     num_pred_slots,
-        #     num_true_slots,
-        #     -1,
-        # )
+            identity_cost = pairwise_cost[:, 0, 0] + pairwise_cost[:, 1, 1]
+            swap_cost     = pairwise_cost[:, 0, 1] + pairwise_cost[:, 1, 0]
 
-        # true_pairwise = true_scaled.unsqueeze(1).expand(
-        #     -1,
-        #     num_pred_slots,
-        #     num_true_slots,
-        #     -1,
-        # )
+            use_swap = swap_cost < identity_cost
 
-        # pairwise_cost = F.huber_loss(
-        #     pred_pairwise,
-        #     true_pairwise,
-        #     delta=self.criterion.delta,
-        #     reduction="none",
-        # ).mean(dim=-1)
+            layer_losses.append(
+                torch.where(use_swap, swap_cost, identity_cost).mean()
+            )
 
-        identity_cost = (
-            pairwise_cost[:, 0, 0]
-            + pairwise_cost[:, 1, 1]
-        )
-
-        swap_cost = (
-            pairwise_cost[:, 0, 1]
-            + pairwise_cost[:, 1, 0]
-        )
-
-        use_swap = swap_cost < identity_cost
-
-        self.loss = torch.where(
-            use_swap,
-            swap_cost,
-            identity_cost,
-        ).mean()
+        self.loss = torch.stack(layer_losses).mean()
 
         pred_positions = self.predictions["predicted_positions"]
         true_positions = self.target_dict["positions"]
@@ -501,8 +571,7 @@ class RegressionEngine(ReconstructionEngine):
         )
 
         position_error = torch.linalg.vector_norm(
-            pred_positions - matched_true,
-            dim=-1,
+            pred_positions - matched_true, dim=-1,
         )
 
         return {
@@ -512,12 +581,10 @@ class RegressionEngine(ReconstructionEngine):
             "mean_position_error": position_error.mean(),
             "swap_fraction": use_swap.float().mean(),
             "predicted_slot_separation": torch.linalg.vector_norm(
-                pred_positions[:, 0] - pred_positions[:, 1],
-                dim=-1,
+                pred_positions[:, 0] - pred_positions[:, 1], dim=-1,
             ).mean(),
             "true_slot_separation": torch.linalg.vector_norm(
-                true_positions[:, 0] - true_positions[:, 1],
-                dim=-1,
+                true_positions[:, 0] - true_positions[:, 1], dim=-1,
             ).mean(),
         }
 
