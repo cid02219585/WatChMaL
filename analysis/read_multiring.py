@@ -23,7 +23,6 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
         """
         self.directory = directory
         self.indices = indices
-        self.ring=ring
         self._training_log = None
         self._log_train = None
         self._train_log_epoch = None
@@ -32,6 +31,7 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
         self._val_log_epoch = None
         self._val_log_loss = None
         self._val_log_best = None
+        self.ring=ring
 
     def plot_training_progression(self, plot_best=True, y_lim=None, fig_size=None, title=None, legend='center right'):
         """
@@ -89,7 +89,7 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
             directory = dirname(dirname(state_file))
             return self.read_training_log_from_csv(directory)
 
-    def get_outputs(self, name):
+    def get_outputs(self, name, apply_swap=True, select_ring=True):
         """
         Read the outputs resulting from the evaluation run of a WatChMaL model.
 
@@ -104,23 +104,24 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
             Two dimensional array of predicted softmax values, where each row corresponds to an event and each column
             contains the softmax values of a class.
         """
-        outputs = np.load(self.directory + "/outputs/" + name + ".npy")
-        output_indices = np.load(self.directory + "/outputs/indices.npy")
-        if self.indices is None:
-            sorted_outputs = outputs[output_indices.argsort()].squeeze()
-        else:
-            intersection = np.intersect1d(self.indices, output_indices, return_indices=True)
-            sorted_outputs = np.zeros(self.indices.shape + outputs.shape[1:])
-            sorted_outputs[intersection[1]] = outputs[intersection[2]]
-            sorted_outputs = sorted_outputs.squeeze()
-    
-        if self.ring is not None:
-            outputs = sorted_outputs[:,self.ring]
-        else:
-            outputs = sorted_outputs
+        outputs = np.load(self.directory + "/outputs/" + name + ".npy")        
+        output_indices = np.load(self.directory + "/outputs/indices.npy")        
+        if self.indices is None:            
+            sorted_outputs = outputs[output_indices.argsort()].squeeze()        
+        else:            
+            intersection = np.intersect1d(self.indices, output_indices, return_indices=True)            
+            sorted_outputs = np.zeros(self.indices.shape + outputs.shape[1:])            
+            sorted_outputs[intersection[1]] = outputs[intersection[2]]            
+            sorted_outputs = sorted_outputs.squeeze()         
+        if apply_swap and getattr(self, "use_swap", None) is not None:            
+            mask = self.use_swap.reshape((-1,) + (1,) * (sorted_outputs.ndim - 1))            
+            sorted_outputs = np.where(mask, sorted_outputs[:, ::-1], sorted_outputs)         
+        if select_ring and self.ring is not None:            
+            outputs = sorted_outputs[:, self.ring]        
+        else:            
+            outputs = sorted_outputs         
         
-        return outputs.squeeze()
-
+        return outputs.squeeze() 
     def read_training_log_from_csv(self, directory):
         """
         Read the training progression logs from the given directory.

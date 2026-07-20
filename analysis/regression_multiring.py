@@ -234,6 +234,12 @@ def tabulate_statistics(runs, quantities, stat_labels, statistic="resolution", s
     else:
         return tabulate.tabulate(data, headers=run_labels, showindex=stat_labels, **tabulate_args)
 
+def match_two_slots(preds, true_positions):
+    cost = ((preds[:, :, None, :] - true_positions[:, None, :, :]) ** 2).mean(axis=-1)  
+    identity_cost = cost[:, 0, 0] + cost[:, 1, 1]
+    swap_cost = cost[:, 0, 1] + cost[:, 1, 0]
+    return swap_cost < identity_cost
+
 
 class RegressionRun(ABC):
     """
@@ -618,6 +624,7 @@ class WatChMaLRegression(RegressionRun, WatChMaLOutput, ABC):
         RegressionRun.__init__(self, run_label=run_label, selection=selection, **plot_args)
         WatChMaLOutput.__init__(self, directory=directory, ring=ring, indices=indices)
         self._predictions = None
+        self.use_swap = None
 
     @property
     def predictions(self):
@@ -635,35 +642,70 @@ class WatChMaLPositionRegression(WatChMaLRegression, PositionPrediction):
 
     predictions_name = "positions"
 
-    def __init__(self, directory, ring, run_label, true_positions=None, true_directions=None, indices=None, selection=None,
-                 **plot_args):
-        """
-        Constructs the object holding the results of a WatChMaL position regression run.
+#     def __init__(self, directory, ring, run_label, true_positions=None, true_directions=None, indices=None, selection=None, match_truth=None,
+#                  **plot_args):
+#         """
+#         Constructs the object holding the results of a WatChMaL position regression run.
 
-        Parameters
-        ----------
-        directory: str
-            Top-level output directory of a WatChMaL regression run.
-        run_label: str
-            Label to describe this set of results to use in plot legends, etc.
-        true_positions: array_like of int, optional
-            Array of true positions for the events in these regression results, to calculate position residuals
-        true_directions: array_like of int, optional
-            Array of true directions for the events in these regression results, to decompose position residuals
-        indices: array_like of int, optional
-            Array of indices of events to select out of the indices output by WatChMaL (by default use all events sorted
-            by their indices).
-        selection: index_expression, optional
-            Selection to apply to the set of events to only use a subset of all events when plotting results, etc.
-            By default, use all results.
-        plot_args: optional
-            Additional arguments to pass to plotting functions, used to set the style when plotting these results
-            together with other runs' results.
-        """
-        WatChMaLRegression.__init__(self, directory=directory, ring=ring, run_label=run_label, indices=indices,
-                                    selection=selection, **plot_args)
+#         Parameters
+#         ----------
+#         directory: str
+#             Top-level output directory of a WatChMaL regression run.
+#         run_label: str
+#             Label to describe this set of results to use in plot legends, etc.
+#         true_positions: array_like of int, optional
+#             Array of true positions for the events in these regression results, to calculate position residuals
+#         true_directions: array_like of int, optional
+#             Array of true directions for the events in these regression results, to decompose position residuals
+#         indices: array_like of int, optional
+#             Array of indices of events to select out of the indices output by WatChMaL (by default use all events sorted
+#             by their indices).
+#         selection: index_expression, optional
+#             Selection to apply to the set of events to only use a subset of all events when plotting results, etc.
+#             By default, use all results.
+#         plot_args: optional
+#             Additional arguments to pass to plotting functions, used to set the style when plotting these results
+#             together with other runs' results.
+#         """
+#         WatChMaLRegression.__init__(self, directory=directory, ring=ring, run_label=run_label, indices=indices,
+#                                     selection=selection, **plot_args)
+        
+#         if match_truth is not None:
+#             saved_ring = self.ring
+#             self.ring = None
+#             raw_preds = self.get_outputs("predicted_positions") 
+#             self.ring = saved_ring
+#             self.use_swap = match_two_slots(raw_preds, match_truth)
+            
+#         PositionPrediction.__init__(self, true_positions=true_positions, true_directions=true_directions)
+
+    def __init__(self, directory, ring, run_label, true_positions=None, true_directions=None,
+                 indices=None, selection=None, match_truth=None, anchor='truth', **plot_args):
+        WatChMaLRegression.__init__(self, directory=directory, ring=ring, run_label=run_label,
+                                    indices=indices, selection=selection, **plot_args)
+
+        if match_truth is not None:
+            raw_preds = self.get_outputs("predicted_positions", apply_swap=False, select_ring=False)
+            swap = match_two_slots(raw_preds, match_truth)
+            self.swap = swap  # keep raw mask around; swap.mean() is your swap fraction
+
+            if anchor == 'truth':
+                # predictions get reordered into truth-slot coords (current behaviour)
+                self.use_swap = swap
+            elif anchor == 'pred':
+                # predictions stay in raw slot order; reorder truth to match them instead
+                def _permute_and_slice(arr):
+                    if arr is None:
+                        return None
+                    arr = np.array(arr)
+                    arr[swap] = arr[swap][:, ::-1]
+                    return arr[:, self.ring] if self.ring is not None else arr
+                true_positions = _permute_and_slice(true_positions)
+                true_directions = _permute_and_slice(true_directions)
+            else:
+                raise ValueError(f"anchor must be 'truth' or 'pred', got {anchor}")
+
         PositionPrediction.__init__(self, true_positions=true_positions, true_directions=true_directions)
-
     @property
     def position_prediction(self):
         """Position predictions output from the WatChMaL regression run"""
