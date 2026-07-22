@@ -526,48 +526,48 @@ class TransformerDecoderLayer(nn.Module):
 
         x = tgt
         if self.norm_first:
-            # x = x + self._sa_block(
-            #     self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
-            # )
-            # x = x + self._mha_block(
-            #     self.norm2(x),
-            #     memory,
-            #     memory_mask,
-            #     memory_key_padding_mask,
-            #     memory_is_causal,
-            # )
-            # x = x + self._ff_block(self.norm3(x))
-
-            x = x + self._sa_block(
-                self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal, query_pos=query_pos
-            )
-            x = x + self._mha_block(
-                self.norm2(x),
-                memory,
-                memory_mask,
-                memory_key_padding_mask,
-                memory_is_causal,
-                query_pos=query_pos,
-            )
-            x = x + self._ff_block(self.norm3(x))
+            if query_pos is None:
+                x = x + self._sa_block(
+                    self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
+                )
+                x = x + self._mha_block(
+                    self.norm2(x),
+                    memory,
+                    memory_mask,
+                    memory_key_padding_mask,
+                    memory_is_causal,
+                )
+                x = x + self._ff_block(self.norm3(x))
+            else:
+                x = x + self._sa_block(
+                    self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal, query_pos=query_pos
+                )
+                x = x + self._mha_block(
+                    self.norm2(x),
+                    memory,
+                    memory_mask,
+                    memory_key_padding_mask,
+                    memory_is_causal,
+                    query_pos=query_pos,
+                )
+                x = x + self._ff_block(self.norm3(x))
         else:
-            # x = self.norm1(
-            #     x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal)
-            # )
-            # x = self.norm2(
-            #     x
-            #     + self._mha_block(
-            #         x, memory, memory_mask, memory_key_padding_mask, memory_is_causal
-            #     )
-            # )
-            # x = self.norm3(x + self._ff_block(x))
-
-            x = tgt
-            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask,
-                                query_pos=query_pos)
-            x = x + self._mha_block(self.norm2(x), memory, memory_mask,
-                                    memory_key_padding_mask, query_pos=query_pos)
-            x = x + self._ff_block(self.norm3(x))
+            if query_pos is None:
+                x = self.norm1(
+                    x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal)
+                )
+                x = self.norm2(
+                    x
+                    + self._mha_block(
+                        x, memory, memory_mask, memory_key_padding_mask, memory_is_causal
+                    )
+                )
+                x = self.norm3(x + self._ff_block(x))
+            else:
+                x = tgt
+                x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, query_pos=query_pos))
+                x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask, query_pos=query_pos))
+                x = self.norm3(x + self._ff_block(x))
 
         return x
 
@@ -580,7 +580,10 @@ class TransformerDecoderLayer(nn.Module):
         is_causal: bool = False,
         query_pos: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        q = k = self._with_pos_embed(x, query_pos)
+        if query_pos is None:
+            q = k = x
+        else:
+            q = k = self._with_pos_embed(x, query_pos)
         x = self.self_attn(
             # x,
             # x,
@@ -603,9 +606,12 @@ class TransformerDecoderLayer(nn.Module):
         is_causal: bool = False,
         query_pos: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if query_pos is not None:
+            x = self._with_pos_embed(x, query_pos)
+
         x = self.multihead_attn(
-            # x,
-            self._with_pos_embed(x, query_pos),
+            x,
+            # self._with_pos_embed(x, query_pos),
             mem,
             mem,
             attn_mask=attn_mask,
@@ -629,12 +635,14 @@ class CrossAttnDecoder(nn.Module):
         num_heads=4,
         num_layers=3,
         dropout=0.1,
+        reinject = False,
         aux_loss=True,
     ):
         super().__init__()
 
         self.num_slots = num_slots
         self.aux_loss=aux_loss
+        self.reinject = reinject
         # self.slot_queries = nn.Parameter(
         #     torch.randn(num_slots, h_feat_dec) * 0.02
         # )
@@ -672,15 +680,18 @@ class CrossAttnDecoder(nn.Module):
         queries = self.slot_queries.unsqueeze(0).expand(
             batch_size, -1, -1
         )
-        # tgt = queries
 
-        tgt, query_pos = torch.zeros_like(queries), queries
+        if self.reinject:
+            tgt, query_pos = torch.zeros_like(queries), queries
+        else:
+            tgt = queries
+
 
         decoded = self.decoder(
             tgt=tgt,
             memory=x_dense,
             memory_key_padding_mask=~mask,#
-            query_pos=query_pos, ## could amke it a flag
+            query_pos=query_pos if self.reinject else None, ## could amke it a flag
             return_intermediate=self.aux_loss and self.training,
         )
 
