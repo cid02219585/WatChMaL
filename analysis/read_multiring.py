@@ -89,7 +89,44 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
             directory = dirname(dirname(state_file))
             return self.read_training_log_from_csv(directory)
 
-    def get_outputs(self, name, apply_swap=True, select_ring=True):
+#     def get_outputs(self, name, concatenate=False):
+#         """
+#         Read the outputs resulting from the evaluation run of a WatChMaL model.
+
+#         Parameters
+#         ----------
+#         name: str
+#             name of the output to load
+
+#         Returns
+#         -------
+#         np.ndarray
+#             Two dimensional array of predicted softmax values, where each row corresponds to an event and each column
+#             contains the softmax values of a class.
+#         """
+#         outputs = np.load(self.directory + "/outputs/" + name + ".npy")        
+#         output_indices = np.load(self.directory + "/outputs/indices.npy")        
+#         if self.indices is None:            
+#             sorted_outputs = outputs[output_indices.argsort()].squeeze()        
+#         else:            
+#             intersection = np.intersect1d(self.indices, output_indices, return_indices=True)            
+#             sorted_outputs = np.zeros(self.indices.shape + outputs.shape[1:])            
+#             sorted_outputs[intersection[1]] = outputs[intersection[2]]            
+#             sorted_outputs = sorted_outputs.squeeze()         
+#         if getattr(self, "use_swap", None) is not None:            
+#             mask = self.use_swap.reshape((-1,) + (1,) * (sorted_outputs.ndim - 1))            
+#             sorted_outputs = np.where(mask, sorted_outputs[:, ::-1], sorted_outputs)         
+            
+#         if concatenate:
+#             outputs = np.concatenate((sorted_outputs[:,0,:], sorted_outputs[:,1,:]), axis= 0)
+#         else:
+#             if self.ring is not None and select_ring:            
+#                 outputs = sorted_outputs[:, self.ring,:]
+#             else:
+#                 outputs = sorted_outputs
+        
+#         return outputs.squeeze() 
+    def get_outputs(self, name,  select_ring=True, concatenate=True):
         """
         Read the outputs resulting from the evaluation run of a WatChMaL model.
 
@@ -113,15 +150,20 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
             sorted_outputs = np.zeros(self.indices.shape + outputs.shape[1:])            
             sorted_outputs[intersection[1]] = outputs[intersection[2]]            
             sorted_outputs = sorted_outputs.squeeze()         
-        if apply_swap and getattr(self, "use_swap", None) is not None:            
+        if getattr(self, "use_swap", None) is not None:            
             mask = self.use_swap.reshape((-1,) + (1,) * (sorted_outputs.ndim - 1))            
             sorted_outputs = np.where(mask, sorted_outputs[:, ::-1], sorted_outputs)         
-        if select_ring and self.ring is not None:            
-            outputs = sorted_outputs[:, self.ring]        
-        else:            
-            outputs = sorted_outputs         
+            
+        if concatenate:
+            outputs = np.concatenate((sorted_outputs[:,0,:], sorted_outputs[:,1,:]), axis= 0)
+        else:
+            if self.ring is not None and select_ring:            
+                outputs = sorted_outputs[:, self.ring,:]
+            else:
+                outputs = sorted_outputs
         
         return outputs.squeeze() 
+    
     def read_training_log_from_csv(self, directory):
         """
         Read the training progression logs from the given directory.

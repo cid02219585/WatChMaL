@@ -226,8 +226,21 @@ def tabulate_statistics(runs, quantities, stat_labels, statistic="resolution", s
                      else (lambda x: stat(x))
                      for stat in statistic]
     data = []
+    
+    def sel(selection,f,q,r):
+        if selection is None:
+            selection = r.selection
+        if selection.shape[0] != r.get_quantity(q).shape[0]:
+#             multiple = r.get_quantity(q).shape[0] // selection.shape[0]
+            selection = np.concatenate((selection, selection))
+        return f(r.get_quantity(q)[selection])
+    
     for f, q in zip(functions, quantities):
-        data.append([f(r.get_quantity(q)[r.selection if selection is None else selection]) for r in runs])
+        data.append([sel(selection, f, q, r) for r in runs])
+        
+#         data.append([f(r.get_quantity(q)[r.selection if selection is None else selection]) for r in runs])
+
+
     if transpose:
         data = list(zip(*data))
         return tabulate.tabulate(data, headers=stat_labels, showindex=run_labels, **tabulate_args)
@@ -625,13 +638,14 @@ class WatChMaLRegression(RegressionRun, WatChMaLOutput, ABC):
         WatChMaLOutput.__init__(self, directory=directory, ring=ring, indices=indices)
         self._predictions = None
         self.use_swap = None
+        self._concatenate = (ring is None)
 
     @property
     def predictions(self):
         """Predictions output from the WatChMaL regression run"""
         if self._predictions is None:
             try:
-                self._predictions = self.get_outputs("predicted_"+self.predictions_name)
+                self._predictions = self.get_outputs("predicted_"+self.predictions_name, concatenate=self._concatenate)
             except (FileNotFoundError, TypeError):
                 self._predictions = self.get_outputs("predictions")
         return self._predictions
@@ -679,21 +693,48 @@ class WatChMaLPositionRegression(WatChMaLRegression, PositionPrediction):
             
 #         PositionPrediction.__init__(self, true_positions=true_positions, true_directions=true_directions)
 
+#     def __init__(self, directory, ring, run_label, true_positions=None, true_directions=None,
+#                  indices=None, selection=None, match_truth=None, anchor='truth', **plot_args):
+#         WatChMaLRegression.__init__(self, directory=directory, ring=ring, run_label=run_label,
+#                                     indices=indices, selection=selection, **plot_args)
+
+#         if match_truth is not None:
+#             raw_preds = self.get_outputs("predicted_positions", apply_swap=False, select_ring=False)
+#             swap = match_two_slots(raw_preds, match_truth)
+#             self.swap = swap  # keep raw mask around; swap.mean() is your swap fraction
+
+#             if anchor == 'truth':
+#                 # predictions get reordered into truth-slot coords (current behaviour)
+#                 self.use_swap = swap
+#             elif anchor == 'pred':
+#                 # predictions stay in raw slot order; reorder truth to match them instead
+#                 def _permute_and_slice(arr):
+#                     if arr is None:
+#                         return None
+#                     arr = np.array(arr)
+#                     arr[swap] = arr[swap][:, ::-1]
+#                     return arr[:, self.ring] if self.ring is not None else arr
+#                 true_positions = _permute_and_slice(true_positions)
+#                 true_directions = _permute_and_slice(true_directions)
+#             else:
+#                 raise ValueError(f"anchor must be 'truth' or 'pred', got {anchor}")
+
+#         PositionPrediction.__init__(self, true_positions=true_positions, true_directions=true_directions)
+        
     def __init__(self, directory, ring, run_label, true_positions=None, true_directions=None,
                  indices=None, selection=None, match_truth=None, anchor='truth', **plot_args):
+        # making all true positions, true directions with all rings 
+        
         WatChMaLRegression.__init__(self, directory=directory, ring=ring, run_label=run_label,
                                     indices=indices, selection=selection, **plot_args)
-
-        if match_truth is not None:
-            raw_preds = self.get_outputs("predicted_positions", apply_swap=False, select_ring=False)
-            swap = match_two_slots(raw_preds, match_truth)
-            self.swap = swap  # keep raw mask around; swap.mean() is your swap fraction
-
+        
+        raw_preds = self.get_outputs("predicted_positions", select_ring=False, concatenate=False)
+        swap = match_two_slots(raw_preds, match_truth)
+        self.swap = swap
+        if ring is not None: 
             if anchor == 'truth':
-                # predictions get reordered into truth-slot coords (current behaviour)
                 self.use_swap = swap
             elif anchor == 'pred':
-                # predictions stay in raw slot order; reorder truth to match them instead
                 def _permute_and_slice(arr):
                     if arr is None:
                         return None
@@ -704,8 +745,16 @@ class WatChMaLPositionRegression(WatChMaLRegression, PositionPrediction):
                 true_directions = _permute_and_slice(true_directions)
             else:
                 raise ValueError(f"anchor must be 'truth' or 'pred', got {anchor}")
+                
+            PositionPrediction.__init__(self, true_positions=true_positions, true_directions=true_directions)
+                
+        else:
+            self.use_swap = swap
+            true_positions = np.concatenate((true_positions[:,0,:], true_positions[:,1,:]), axis= 0)
+            true_directions = np.concatenate((true_directions[:,0,:], true_directions[:,1,:]), axis= 0)
 
-        PositionPrediction.__init__(self, true_positions=true_positions, true_directions=true_directions)
+            PositionPrediction.__init__(self, true_positions=true_positions, true_directions=true_directions)
+        
     @property
     def position_prediction(self):
         """Position predictions output from the WatChMaL regression run"""
