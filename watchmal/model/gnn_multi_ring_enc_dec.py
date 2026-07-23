@@ -531,12 +531,17 @@ class TransformerDecoderLayer(nn.Module):
                 x = x + self._sa_block(
                     self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
                 )
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_mask,
+                #     memory_key_padding_mask,
+                #     memory_is_causal,
+                # )
                 x = x + self._mha_block(
                     self.norm2(x),
                     memory,
-                    memory_mask,
                     memory_key_padding_mask,
-                    memory_is_causal,
                 )
                 x = x + self._ff_block(self.norm3(x))
             else:
