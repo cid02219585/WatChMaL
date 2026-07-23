@@ -559,18 +559,18 @@ class RegressionEngine(ReconstructionEngine):
                 torch.where(use_swap, swap_cost, identity_cost).mean()
             )
 
-        # self.loss = torch.stack(layer_losses).mean()
+        self.loss = torch.stack(layer_losses).mean()
 
-        final_loss = layer_losses[-1]
+        # final_loss = layer_losses[-1]
 
-        if len(layer_losses) > 1:
-            auxiliary_loss = torch.stack(layer_losses[:-1]).mean()
-        else:
-            auxiliary_loss = final_loss.new_zeros(())
+        # if len(layer_losses) > 1:
+        #     auxiliary_loss = torch.stack(layer_losses[:-1]).mean()
+        # else:
+        #     auxiliary_loss = final_loss.new_zeros(())
 
-        aux_weight = 0.2
+        # aux_weight = 0.2
 
-        self.loss = final_loss + aux_weight * auxiliary_loss
+        # self.loss = final_loss + aux_weight * auxiliary_loss
 
         pred_positions = self.predictions["predicted_positions"]
         true_positions = self.target_dict["positions"]

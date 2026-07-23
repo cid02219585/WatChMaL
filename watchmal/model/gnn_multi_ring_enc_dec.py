@@ -8,7 +8,8 @@ from torch_scatter import scatter_mean
 from torch_geometric.utils import to_dense_batch
 from typing import Callable
 import copy
-
+import numpy as np
+import math
 
 class NonHierGAT_encoder(nn.Module):
     def __init__(self,
@@ -542,14 +543,21 @@ class TransformerDecoderLayer(nn.Module):
                 x = x + self._sa_block(
                     self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal, query_pos=query_pos
                 )
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_mask,
+                #     memory_key_padding_mask,
+                #     memory_is_causal,
+                #     query_pos=query_pos,
+                # )
                 x = x + self._mha_block(
                     self.norm2(x),
                     memory,
-                    memory_mask,
                     memory_key_padding_mask,
-                    memory_is_causal,
                     query_pos=query_pos,
                 )
+
                 x = x + self._ff_block(self.norm3(x))
         else:
             if query_pos is None:
@@ -596,30 +604,94 @@ class TransformerDecoderLayer(nn.Module):
         )[0]
         return self.dropout1(x)
 
-    # multihead attention block
+    # # multihead attention block
+    # def _mha_block(
+    #     self,
+    #     x: torch.Tensor,
+    #     mem: torch.Tensor,
+    #     attn_mask: torch.Tensor | None,
+    #     key_padding_mask: torch.Tensor | None,
+    #     is_causal: bool = False,
+    #     query_pos: torch.Tensor | None = None,
+    # ) -> torch.Tensor:
+    #     if query_pos is not None:
+    #         x = self._with_pos_embed(x, query_pos)
+
+    #     x = self.multihead_attn(
+    #         x,
+    #         # self._with_pos_embed(x, query_pos),
+    #         mem,
+    #         mem,
+    #         attn_mask=attn_mask,
+    #         key_padding_mask=key_padding_mask,
+    #         is_causal=is_causal,
+    #         need_weights=False,
+    #     )[0]
+    #     return self.dropout2(x)
+
+### Competitive slot attention
+
     def _mha_block(
         self,
-        x: torch.Tensor,
-        mem: torch.Tensor,
-        attn_mask: torch.Tensor | None,
+        x: torch.Tensor,                  # [B, S, D]
+        mem: torch.Tensor,                # [B, N, D]
         key_padding_mask: torch.Tensor | None,
-        is_causal: bool = False,
         query_pos: torch.Tensor | None = None,
+        temperature: float = 1.0,
     ) -> torch.Tensor:
         if query_pos is not None:
             x = self._with_pos_embed(x, query_pos)
 
-        x = self.multihead_attn(
-            x,
-            # self._with_pos_embed(x, query_pos),
-            mem,
-            mem,
-            attn_mask=attn_mask,
-            key_padding_mask=key_padding_mask,
-            is_causal=is_causal,
-            need_weights=False,
-        )[0]
-        return self.dropout2(x)
+        batch_size, num_slots, embed_dim = x.shape
+        num_nodes = mem.shape[1]
+        num_heads = self.multihead_attn.num_heads
+        head_dim = embed_dim // num_heads
+
+        q_weight, k_weight, v_weight = self.multihead_attn.in_proj_weight.chunk(3)
+        q_bias, k_bias, v_bias = self.multihead_attn.in_proj_bias.chunk(3)
+
+        q = F.linear(x, q_weight, q_bias)
+        k = F.linear(mem, k_weight, k_bias)
+        v = F.linear(mem, v_weight, v_bias)
+
+        q = q.view(batch_size, num_slots, num_heads, head_dim).transpose(1, 2)
+        k = k.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
+        v = v.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
+
+        logits = torch.matmul(q, k.transpose(-2, -1))
+        logits = logits / np.sqrt(head_dim)
+        logits = logits / temperature
+
+        # if key_padding_mask is not None:
+        #     logits = logits.masked_fill(
+        #         key_padding_mask[:, None, None, :],
+        #         float("-inf"),
+        #     )
+
+        assignments = torch.softmax(logits, dim=-2)
+
+        if key_padding_mask is not None:
+            assignments = assignments.masked_fill(
+                key_padding_mask[:, None, None, :],
+                0.0,
+            )
+
+        attn = assignments / (
+            assignments.sum(dim=-1, keepdim=True) + 1e-8
+        )
+        attn = F.dropout(attn, p=self.multihead_attn.dropout, training=self.training)
+
+        output = torch.matmul(attn, v)
+
+        output = (
+            output.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, num_slots, embed_dim)
+        )
+
+        output = self.multihead_attn.out_proj(output)
+
+        return self.dropout2(output)
 
     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
