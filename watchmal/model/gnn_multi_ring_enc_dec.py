@@ -531,37 +531,37 @@ class TransformerDecoderLayer(nn.Module):
                 x = x + self._sa_block(
                     self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
                 )
-                # x = x + self._mha_block(
-                #     self.norm2(x),
-                #     memory,
-                #     memory_mask,
-                #     memory_key_padding_mask,
-                #     memory_is_causal,
-                # )
                 x = x + self._mha_block(
                     self.norm2(x),
                     memory,
+                    memory_mask,
                     memory_key_padding_mask,
+                    memory_is_causal,
                 )
-                x = x + self._ff_block(self.norm3(x))
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_key_padding_mask,
+                # )
+                # x = x + self._ff_block(self.norm3(x))
             else:
                 x = x + self._sa_block(
                     self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal, query_pos=query_pos
                 )
-                # x = x + self._mha_block(
-                #     self.norm2(x),
-                #     memory,
-                #     memory_mask,
-                #     memory_key_padding_mask,
-                #     memory_is_causal,
-                #     query_pos=query_pos,
-                # )
                 x = x + self._mha_block(
                     self.norm2(x),
                     memory,
+                    memory_mask,
                     memory_key_padding_mask,
+                    memory_is_causal,
                     query_pos=query_pos,
                 )
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_key_padding_mask,
+                #     query_pos=query_pos,
+                # )
 
                 x = x + self._ff_block(self.norm3(x))
         else:
@@ -610,92 +610,92 @@ class TransformerDecoderLayer(nn.Module):
         return self.dropout1(x)
 
     # # multihead attention block
-    # def _mha_block(
-    #     self,
-    #     x: torch.Tensor,
-    #     mem: torch.Tensor,
-    #     attn_mask: torch.Tensor | None,
-    #     key_padding_mask: torch.Tensor | None,
-    #     is_causal: bool = False,
-    #     query_pos: torch.Tensor | None = None,
-    # ) -> torch.Tensor:
-    #     if query_pos is not None:
-    #         x = self._with_pos_embed(x, query_pos)
-
-    #     x = self.multihead_attn(
-    #         x,
-    #         # self._with_pos_embed(x, query_pos),
-    #         mem,
-    #         mem,
-    #         attn_mask=attn_mask,
-    #         key_padding_mask=key_padding_mask,
-    #         is_causal=is_causal,
-    #         need_weights=False,
-    #     )[0]
-    #     return self.dropout2(x)
-
-### Competitive slot attention
-
     def _mha_block(
         self,
-        x: torch.Tensor,                  # [B, S, D]
-        mem: torch.Tensor,                # [B, N, D]
+        x: torch.Tensor,
+        mem: torch.Tensor,
+        attn_mask: torch.Tensor | None,
         key_padding_mask: torch.Tensor | None,
+        is_causal: bool = False,
         query_pos: torch.Tensor | None = None,
-        temperature: float = 1.0,
     ) -> torch.Tensor:
         if query_pos is not None:
             x = self._with_pos_embed(x, query_pos)
 
-        batch_size, num_slots, embed_dim = x.shape
-        num_nodes = mem.shape[1]
-        num_heads = self.multihead_attn.num_heads
-        head_dim = embed_dim // num_heads
+        x = self.multihead_attn(
+            x,
+            # self._with_pos_embed(x, query_pos),
+            mem,
+            mem,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            is_causal=is_causal,
+            need_weights=False,
+        )[0]
+        return self.dropout2(x)
 
-        q_weight, k_weight, v_weight = self.multihead_attn.in_proj_weight.chunk(3)
-        q_bias, k_bias, v_bias = self.multihead_attn.in_proj_bias.chunk(3)
+### Competitive slot attention
 
-        q = F.linear(x, q_weight, q_bias)
-        k = F.linear(mem, k_weight, k_bias)
-        v = F.linear(mem, v_weight, v_bias)
+    # def _mha_block(
+    #     self,
+    #     x: torch.Tensor,                  # [B, S, D]
+    #     mem: torch.Tensor,                # [B, N, D]
+    #     key_padding_mask: torch.Tensor | None,
+    #     query_pos: torch.Tensor | None = None,
+    #     temperature: float = 1.0,
+    # ) -> torch.Tensor:
+    #     if query_pos is not None:
+    #         x = self._with_pos_embed(x, query_pos)
 
-        q = q.view(batch_size, num_slots, num_heads, head_dim).transpose(1, 2)
-        k = k.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
-        v = v.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
+    #     batch_size, num_slots, embed_dim = x.shape
+    #     num_nodes = mem.shape[1]
+    #     num_heads = self.multihead_attn.num_heads
+    #     head_dim = embed_dim // num_heads
 
-        logits = torch.matmul(q, k.transpose(-2, -1))
-        logits = logits / np.sqrt(head_dim)
-        logits = logits / temperature
+    #     q_weight, k_weight, v_weight = self.multihead_attn.in_proj_weight.chunk(3)
+    #     q_bias, k_bias, v_bias = self.multihead_attn.in_proj_bias.chunk(3)
 
-        # if key_padding_mask is not None:
-        #     logits = logits.masked_fill(
-        #         key_padding_mask[:, None, None, :],
-        #         float("-inf"),
-        #     )
+    #     q = F.linear(x, q_weight, q_bias)
+    #     k = F.linear(mem, k_weight, k_bias)
+    #     v = F.linear(mem, v_weight, v_bias)
 
-        standard_attn = torch.softmax(logits, dim=-1)
+    #     q = q.view(batch_size, num_slots, num_heads, head_dim).transpose(1, 2)
+    #     k = k.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
+    #     v = v.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
 
-        assignments = torch.softmax(logits, dim=-2)
-        competitive_attn = assignments / (
-            assignments.sum(dim=-1, keepdim=True) + 1e-8
-        )
+    #     logits = torch.matmul(q, k.transpose(-2, -1))
+    #     logits = logits / np.sqrt(head_dim)
+    #     logits = logits / temperature
 
-        alpha = 0.1
-        attn = (1 - alpha) * standard_attn + alpha * competitive_attn
+    #     # if key_padding_mask is not None:
+    #     #     logits = logits.masked_fill(
+    #     #         key_padding_mask[:, None, None, :],
+    #     #         float("-inf"),
+    #     #     )
 
-        attn = F.dropout(attn, p=self.multihead_attn.dropout, training=self.training)
+    #     standard_attn = torch.softmax(logits, dim=-1)
 
-        output = torch.matmul(attn, v)
+    #     assignments = torch.softmax(logits, dim=-2)
+    #     competitive_attn = assignments / (
+    #         assignments.sum(dim=-1, keepdim=True) + 1e-8
+    #     )
 
-        output = (
-            output.transpose(1, 2)
-            .contiguous()
-            .view(batch_size, num_slots, embed_dim)
-        )
+    #     alpha = 0.1
+    #     attn = (1 - alpha) * standard_attn + alpha * competitive_attn
 
-        output = self.multihead_attn.out_proj(output)
+    #     attn = F.dropout(attn, p=self.multihead_attn.dropout, training=self.training)
 
-        return self.dropout2(output)
+    #     output = torch.matmul(attn, v)
+
+    #     output = (
+    #         output.transpose(1, 2)
+    #         .contiguous()
+    #         .view(batch_size, num_slots, embed_dim)
+    #     )
+
+    #     output = self.multihead_attn.out_proj(output)
+
+    #     return self.dropout2(output)
 
     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
@@ -742,12 +742,57 @@ class CrossAttnDecoder(nn.Module):
         )
 
         # Shared head across slots
-        self.head = nn.Sequential(
+        # self.head = nn.Sequential(
+        #     nn.LayerNorm(h_feat_dec),
+        #     nn.Linear(h_feat_dec, h_feat_dec),
+        #     nn.GELU(),
+        #     nn.Linear(h_feat_dec, num_output_channels),
+        # )
+
+## dir loss
+        self.output_features = nn.Sequential(
             nn.LayerNorm(h_feat_dec),
             nn.Linear(h_feat_dec, h_feat_dec),
             nn.GELU(),
-            nn.Linear(h_feat_dec, num_output_channels),
         )
+
+        self.position_head = nn.Linear(
+            h_feat_dec,
+            num_output_channels,
+        )
+
+        self.direction_head = nn.Linear(
+            h_feat_dec,
+            3,
+        )
+
+
+
+    # def forward(self, x_m, batch):
+    #     x_dense, mask = to_dense_batch(x_m, batch)
+
+    #     batch_size = x_dense.size(0)
+
+    #     queries = self.slot_queries.unsqueeze(0).expand(
+    #         batch_size, -1, -1
+    #     )
+
+    #     if self.reinject:
+    #         tgt, query_pos = torch.zeros_like(queries), queries
+    #     else:
+    #         tgt = queries
+
+
+    #     decoded = self.decoder(
+    #         tgt=tgt,
+    #         memory=x_dense,
+    #         memory_key_padding_mask=~mask,#
+    #         query_pos=query_pos if self.reinject else None, ## could amke it a flag
+    #         return_intermediate=self.aux_loss and self.training,
+    #     )
+
+    #     return self.head(decoded)
+
     def forward(self, x_m, batch):
         x_dense, mask = to_dense_batch(x_m, batch)
 
@@ -758,20 +803,36 @@ class CrossAttnDecoder(nn.Module):
         )
 
         if self.reinject:
-            tgt, query_pos = torch.zeros_like(queries), queries
+            tgt = torch.zeros_like(queries)
+            query_pos = queries
         else:
             tgt = queries
-
+            query_pos = None
 
         decoded = self.decoder(
             tgt=tgt,
             memory=x_dense,
-            memory_key_padding_mask=~mask,#
-            query_pos=query_pos if self.reinject else None, ## could amke it a flag
+            memory_key_padding_mask=~mask,
+            query_pos=query_pos,
             return_intermediate=self.aux_loss and self.training,
         )
 
-        return self.head(decoded)
+
+        features = self.output_features(decoded)
+
+        positions = self.position_head(features)
+
+        directions = F.normalize(
+            self.direction_head(features),
+            p=2,
+            dim=-1,
+            eps=1e-8,
+        )
+
+        return torch.cat(
+            [positions, directions],
+            dim=-1,
+        )
 
 
 
