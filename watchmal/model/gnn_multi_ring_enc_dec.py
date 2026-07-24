@@ -673,17 +673,16 @@ class TransformerDecoderLayer(nn.Module):
         #         float("-inf"),
         #     )
 
+        standard_attn = torch.softmax(logits, dim=-1)
+
         assignments = torch.softmax(logits, dim=-2)
-
-        if key_padding_mask is not None:
-            assignments = assignments.masked_fill(
-                key_padding_mask[:, None, None, :],
-                0.0,
-            )
-
-        attn = assignments / (
+        competitive_attn = assignments / (
             assignments.sum(dim=-1, keepdim=True) + 1e-8
         )
+
+        alpha = 0.1
+        attn = (1 - alpha) * standard_attn + alpha * competitive_attn
+
         attn = F.dropout(attn, p=self.multihead_attn.dropout, training=self.training)
 
         output = torch.matmul(attn, v)
