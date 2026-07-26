@@ -629,7 +629,7 @@ class RegressionEngine(ReconstructionEngine):
         final_position_loss = None
         final_direction_loss = None
 
-        direction_weight = 0.1
+        direction_weight = 0.03
 
         for layer_output in per_layer_outputs:
             pred_positions_scaled = layer_output[..., :3]
@@ -729,6 +729,7 @@ class RegressionEngine(ReconstructionEngine):
                 dim=-1,
             ).mean(),
         }
+
     def save_state(self, suffix="", name=None):
         self.state_data["target_sizes"] = self.target_sizes
         super().save_state(suffix, name)

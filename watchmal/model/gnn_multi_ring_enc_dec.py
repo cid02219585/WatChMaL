@@ -538,6 +538,7 @@ class TransformerDecoderLayer(nn.Module):
                     memory_key_padding_mask,
                     memory_is_causal,
                 )
+                # print('error')
                 # x = x + self._mha_block(
                 #     self.norm2(x),
                 #     memory,
@@ -610,94 +611,144 @@ class TransformerDecoderLayer(nn.Module):
         return self.dropout1(x)
 
     # # multihead attention block
-    def _mha_block(
-        self,
-        x: torch.Tensor,
-        mem: torch.Tensor,
-        attn_mask: torch.Tensor | None,
-        key_padding_mask: torch.Tensor | None,
-        is_causal: bool = False,
-        query_pos: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        if query_pos is not None:
-            x = self._with_pos_embed(x, query_pos)
-
-        x = self.multihead_attn(
-            x,
-            # self._with_pos_embed(x, query_pos),
-            mem,
-            mem,
-            attn_mask=attn_mask,
-            key_padding_mask=key_padding_mask,
-            is_causal=is_causal,
-            need_weights=False,
-        )[0]
-        return self.dropout2(x)
-
-### Competitive slot attention
-
     # def _mha_block(
     #     self,
-    #     x: torch.Tensor,                  # [B, S, D]
-    #     mem: torch.Tensor,                # [B, N, D]
+    #     x: torch.Tensor,
+    #     mem: torch.Tensor,
+    #     attn_mask: torch.Tensor | None,
     #     key_padding_mask: torch.Tensor | None,
+    #     is_causal: bool = False,
     #     query_pos: torch.Tensor | None = None,
-    #     temperature: float = 1.0,
     # ) -> torch.Tensor:
     #     if query_pos is not None:
     #         x = self._with_pos_embed(x, query_pos)
 
-    #     batch_size, num_slots, embed_dim = x.shape
-    #     num_nodes = mem.shape[1]
-    #     num_heads = self.multihead_attn.num_heads
-    #     head_dim = embed_dim // num_heads
+    #     x = self.multihead_attn(
+    #         x,
+    #         # self._with_pos_embed(x, query_pos),
+    #         mem,
+    #         mem,
+    #         attn_mask=attn_mask,
+    #         key_padding_mask=key_padding_mask,
+    #         is_causal=is_causal,
+    #         need_weights=False,
+    #     )[0]
+    #     return self.dropout2(x)
 
-    #     q_weight, k_weight, v_weight = self.multihead_attn.in_proj_weight.chunk(3)
-    #     q_bias, k_bias, v_bias = self.multihead_attn.in_proj_bias.chunk(3)
+### Competitive slot attention
+    def _mha_block(
+        self,
+        x: torch.Tensor,                  # [B, S, D]
+        mem: torch.Tensor,                # [B, N, D]
+        attn_mask: torch.Tensor | None,
+        key_padding_mask: torch.Tensor | None,
+        is_causal: bool = False,
+        query_pos: torch.Tensor | None = None,
+        temperature: float = 1.0,
+    ) -> torch.Tensor:
+        if query_pos is not None:
+            x = self._with_pos_embed(x, query_pos)
 
-    #     q = F.linear(x, q_weight, q_bias)
-    #     k = F.linear(mem, k_weight, k_bias)
-    #     v = F.linear(mem, v_weight, v_bias)
+        batch_size, num_slots, embed_dim = x.shape
+        num_nodes = mem.size(1)
+        num_heads = self.multihead_attn.num_heads
+        head_dim = embed_dim // num_heads
 
-    #     q = q.view(batch_size, num_slots, num_heads, head_dim).transpose(1, 2)
-    #     k = k.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
-    #     v = v.view(batch_size, num_nodes, num_heads, head_dim).transpose(1, 2)
+        q_weight, k_weight, v_weight = (
+            self.multihead_attn.in_proj_weight.chunk(3)
+        )
 
-    #     logits = torch.matmul(q, k.transpose(-2, -1))
-    #     logits = logits / np.sqrt(head_dim)
-    #     logits = logits / temperature
+        if self.multihead_attn.in_proj_bias is not None:
+            q_bias, k_bias, v_bias = (
+                self.multihead_attn.in_proj_bias.chunk(3)
+            )
+        else:
+            q_bias = k_bias = v_bias = None
 
-    #     # if key_padding_mask is not None:
-    #     #     logits = logits.masked_fill(
-    #     #         key_padding_mask[:, None, None, :],
-    #     #         float("-inf"),
-    #     #     )
+        q = F.linear(x, q_weight, q_bias)
+        k = F.linear(mem, k_weight, k_bias)
+        v = F.linear(mem, v_weight, v_bias)
 
-    #     standard_attn = torch.softmax(logits, dim=-1)
+        q = q.view(
+            batch_size, num_slots, num_heads, head_dim
+        ).transpose(1, 2)
 
-    #     assignments = torch.softmax(logits, dim=-2)
-    #     competitive_attn = assignments / (
-    #         assignments.sum(dim=-1, keepdim=True) + 1e-8
-    #     )
+        k = k.view(
+            batch_size, num_nodes, num_heads, head_dim
+        ).transpose(1, 2)
 
-    #     alpha = 0.1
-    #     attn = (1 - alpha) * standard_attn + alpha * competitive_attn
+        v = v.view(
+            batch_size, num_nodes, num_heads, head_dim
+        ).transpose(1, 2)
 
-    #     attn = F.dropout(attn, p=self.multihead_attn.dropout, training=self.training)
+        # [B, H, S, N]
+        logits = torch.matmul(
+            q,
+            k.transpose(-2, -1),
+        )
 
-    #     output = torch.matmul(attn, v)
+        logits = logits / math.sqrt(head_dim)
+        logits = logits / temperature
 
-    #     output = (
-    #         output.transpose(1, 2)
-    #         .contiguous()
-    #         .view(batch_size, num_slots, embed_dim)
-    #     )
+        if key_padding_mask is not None:
+            valid_nodes = ~key_padding_mask[:, None, None, :]
 
-    #     output = self.multihead_attn.out_proj(output)
+            masked_logits = logits.masked_fill(
+                ~valid_nodes,
+                -1e9,
+            )
+        else:
+            valid_nodes = None
+            masked_logits = logits
 
-    #     return self.dropout2(output)
+        standard_attn = torch.softmax(
+            masked_logits,
+            dim=-1,
+        )
 
-    # feed forward block
+        assignments = torch.softmax(
+            masked_logits,
+            dim=-2,
+        )
+
+        if valid_nodes is not None:
+            standard_attn = standard_attn * valid_nodes
+            assignments = assignments * valid_nodes
+
+            standard_attn = standard_attn / (
+                standard_attn.sum(dim=-1, keepdim=True) + 1e-8
+            )
+
+        competitive_attn = assignments / (
+            assignments.sum(dim=-1, keepdim=True) + 1e-8
+        )
+
+        alpha = 0.1
+
+        attn = (
+            (1.0 - alpha) * standard_attn
+            + alpha * competitive_attn
+        )
+
+        attn = F.dropout(
+            attn,
+            p=self.multihead_attn.dropout,
+            training=self.training,
+        )
+
+        output = torch.matmul(attn, v)
+
+        output = (
+            output.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, num_slots, embed_dim)
+        )
+
+        output = self.multihead_attn.out_proj(output)
+
+        return self.dropout2(output)
+
+#     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout3(x)
@@ -749,6 +800,19 @@ class CrossAttnDecoder(nn.Module):
         #     nn.Linear(h_feat_dec, num_output_channels),
         # )
 
+## sep heads
+        # self.heads = nn.ModuleList([
+        #     nn.Sequential(
+        #         nn.LayerNorm(h_feat_dec),
+        #         nn.Linear(h_feat_dec, h_feat_dec),
+        #         nn.GELU(),
+        #         nn.Linear(h_feat_dec, num_output_channels),
+        #     )
+        #     for _ in range(num_slots)
+        # ])
+
+
+
 ## dir loss
         self.output_features = nn.Sequential(
             nn.LayerNorm(h_feat_dec),
@@ -756,15 +820,26 @@ class CrossAttnDecoder(nn.Module):
             nn.GELU(),
         )
 
-        self.position_head = nn.Linear(
+        # self.position_head = nn.Linear(
+        #     h_feat_dec,
+        #     num_output_channels,
+        # )
+
+        # self.direction_head = nn.Linear(
+        #     h_feat_dec,
+        #     3,
+        # )
+## sep heads with dir 
+        self.position_heads = nn.ModuleList([nn.Linear(
             h_feat_dec,
             num_output_channels,
-        )
+        ) for _ in range(num_slots)]) 
 
-        self.direction_head = nn.Linear(
+        self.direction_heads = nn.ModuleList([nn.Linear(
             h_feat_dec,
             3,
-        )
+        ) for _ in range(num_slots)])
+
 
 
 
@@ -793,6 +868,15 @@ class CrossAttnDecoder(nn.Module):
 
     #     return self.head(decoded)
 
+    #     # return torch.stack(
+    #     #     [
+    #     #         self.heads[i](decoded[..., i, :])
+    #     #         for i in range(self.num_slots)
+    #     #     ],
+    #     #     dim=-2,
+    #     # )
+
+# direction loss run
     def forward(self, x_m, batch):
         x_dense, mask = to_dense_batch(x_m, batch)
 
@@ -818,12 +902,42 @@ class CrossAttnDecoder(nn.Module):
         )
 
 
+        # features = self.output_features(decoded)
+
+        # positions = self.position_head(features)
+
+        # directions = F.normalize(
+        #     self.direction_head(features),
+        #     p=2,
+        #     dim=-1,
+        #     eps=1e-8,
+        # )
+
+        # return torch.cat(
+        #     [positions, directions],
+        #     dim=-1,
+        # )
+
         features = self.output_features(decoded)
 
-        positions = self.position_head(features)
+        positions = torch.stack(
+            [
+                self.position_heads[i](features[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
+
+        dirs = torch.stack(
+            [
+                self.direction_heads[i](features[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
 
         directions = F.normalize(
-            self.direction_head(features),
+            dirs,
             p=2,
             dim=-1,
             eps=1e-8,
@@ -833,6 +947,7 @@ class CrossAttnDecoder(nn.Module):
             [positions, directions],
             dim=-1,
         )
+
 
 
 
