@@ -657,21 +657,21 @@ class CrossAttnDecoder(nn.Module):
 
 
 ## dir loss
-#         self.output_features = nn.Sequential(
-#             nn.LayerNorm(h_feat_dec),
-#             nn.Linear(h_feat_dec, h_feat_dec),
-#             nn.GELU(),
-#         )
+        self.output_features = nn.Sequential(
+            nn.LayerNorm(h_feat_dec),
+            nn.Linear(h_feat_dec, h_feat_dec),
+            nn.GELU(),
+        )
 
-#         # self.position_head = nn.Linear(
-#         #     h_feat_dec,
-#         #     num_output_channels,
-#         # )
+        self.position_head = nn.Linear(
+            h_feat_dec,
+            num_output_channels,
+        )
 
-#         # self.direction_head = nn.Linear(
-#         #     h_feat_dec,
-#         #     3,
-#         # )
+        self.direction_head = nn.Linear(
+            h_feat_dec,
+            3,
+        )
 # ## sep heads with dir 
 #         # self.position_heads = nn.ModuleList([nn.Linear(
 #         #     h_feat_dec,
@@ -702,57 +702,33 @@ class CrossAttnDecoder(nn.Module):
             query_pos=query_pos,
             return_intermediate=self.aux_loss and self.training,
         )
-        return self.head(decoded)
+    #     return self.head(decoded)
 
-        # return torch.stack(
-        #     [
-        #         self.heads[i](decoded[..., i, :])
-        #         for i in range(self.num_slots)
-        #     ],
-        #     dim=-2,
-        # )
+    #     # return torch.stack(
+    #     #     [
+    #     #         self.heads[i](decoded[..., i, :])
+    #     #         for i in range(self.num_slots)
+    #     #     ],
+    #     #     dim=-2,
+    #     # )
 
 # direction loss run
-    # def forward(self, x_m, batch):
-    #     x_dense, mask = to_dense_batch(x_m, batch)
 
-    #     batch_size = x_dense.size(0)
+        features = self.output_features(decoded)
 
-    #     queries = self.slot_queries.unsqueeze(0).expand(
-    #         batch_size, -1, -1
-    #     )
+        positions = self.position_head(features)
 
-    #     if self.reinject:
-    #         tgt = torch.zeros_like(queries)
-    #         query_pos = queries
-    #     else:
-    #         tgt = queries
-    #         query_pos = None
+        directions = F.normalize(
+            self.direction_head(features),
+            p=2,
+            dim=-1,
+            eps=1e-8,
+        )
 
-    #     decoded = self.decoder(
-    #         tgt=tgt,
-    #         memory=x_dense,
-    #         memory_key_padding_mask=~mask,
-    #         query_pos=query_pos,
-    #         return_intermediate=self.aux_loss and self.training,
-    #     )
-
-
-        # # features = self.output_features(decoded)
-
-        # # positions = self.position_head(features)
-
-        # # directions = F.normalize(
-        # #     self.direction_head(features),
-        # #     p=2,
-        # #     dim=-1,
-        # #     eps=1e-8,
-        # # )
-
-        # # return torch.cat(
-        # #     [positions, directions],
-        # #     dim=-1,
-        # # )
+        return torch.cat(
+            [positions, directions],
+            dim=-1,
+        )
 
         # features = self.output_features(decoded)
 
