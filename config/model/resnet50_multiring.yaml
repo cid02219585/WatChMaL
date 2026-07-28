@@ -7,7 +7,7 @@ encoder:
 
 decoder:
   _target_: watchmal.model.resnet_multi_ring_enc_dec.CrossAttnDecoder
-  h_feat_dec: 2048
+  h_feat_dec: 128
   num_output_channels: 7
   num_slots: 2
   num_layers: 3

@@ -686,29 +686,22 @@ class CrossAttnDecoder(nn.Module):
 
 
 
-    def forward(self, x_m, batch):
-        x_dense, mask = to_dense_batch(x_m, batch)
-
+    def forward(self, x_dense, mask=None):
         batch_size = x_dense.size(0)
-
-        queries = self.slot_queries.unsqueeze(0).expand(
-            batch_size, -1, -1
-        )
+        queries = self.slot_queries.unsqueeze(0).expand(batch_size, -1, -1)
 
         if self.reinject:
             tgt, query_pos = torch.zeros_like(queries), queries
         else:
-            tgt = queries
-
+            tgt, query_pos = queries, None
 
         decoded = self.decoder(
             tgt=tgt,
             memory=x_dense,
-            memory_key_padding_mask=~mask,#
-            query_pos=query_pos if self.reinject else None, ## could amke it a flag
+            memory_key_padding_mask=mask,
+            query_pos=query_pos,
             return_intermediate=self.aux_loss and self.training,
         )
-
         return self.head(decoded)
 
         # return torch.stack(
@@ -793,16 +786,16 @@ class CrossAttnDecoder(nn.Module):
 
 
 
-
-    
 class EncoderDecoder(nn.Module):
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder, decoder, enc_channels=2048, h_feat_dec=128):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.input_proj = nn.Conv2d(enc_channels, h_feat_dec, kernel_size=1)
 
     def forward(self, data):
-        enc_all_outputs, batch = self.encoder(data)
-        output = self.decoder(enc_all_outputs, batch)
-
-        return output
+        feat = self.encoder(data)              
+        feat = self.input_proj(feat)       
+        B, C, H, W = feat.shape
+        x_dense = feat.flatten(2).transpose(1, 2)
+        return self.decoder(x_dense)
