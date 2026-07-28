@@ -1,5 +1,16 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+ 
+from torch_geometric.nn import TransformerConv, HeteroConv, GATConv, GATv2Conv, global_add_pool, global_mean_pool
+
+from torch_scatter import scatter_mean
+from torch_geometric.utils import to_dense_batch
+from typing import Callable
+import copy
+import numpy as np
+import math
+
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -162,90 +173,428 @@ def resnet50_encoder(**kwargs):
     return ResNet_encoder(Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
-class Decoder(nn.Module):
-    """The base decoder interface for the encoder--decoder architecture."""
-    def __init__(self, h_feat_dec=2048, num_output_channels=7, num_slots=2):
+
+
+
+## implemented  from pytorch
+# 
+# so i can edit details
+
+
+# def _get_seq_len(src: torch.Tensor, batch_first: bool) -> int | None:
+#     if src.is_nested:
+#         return None
+#     else:
+#         src_size = src.size()
+#         if len(src_size) == 2:
+#             # unbatched: S, E
+#             return src_size[0]
+#         else:
+#             # batched: B, S, E if batch_first else S, B, E
+#             seq_len_pos = 1 if batch_first else 0
+#             return src_size[seq_len_pos]
+
+
+def _get_clones(module, N):
+    # FIXME: copy.deepcopy() is not defined on nn.module
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
+# def _detect_is_causal_mask(
+#     mask: torch.Tensor | None,
+#     is_causal: bool | None = None,
+#     size: int | None = None,
+# ) -> bool:
+
+#     # Prevent type refinement
+#     make_causal = is_causal is True
+
+#     if is_causal is None and mask is not None:
+#         sz = size if size is not None else mask.size(-2)
+#         causal_comparison = _generate_square_subsequent_mask(
+#             sz, device=mask.device, dtype=mask.dtype
+#         )
+
+#         # Do not use `torch.equal` so we handle batched masks by
+#         # broadcasting the comparison.
+#         if mask.size() == causal_comparison.size():
+#             make_causal = bool((mask == causal_comparison).all())
+#         else:
+#             make_causal = False
+
+#     return make_causal
+
+
+class TransformerDecoder(nn.Module):
+    __constants__ = ["norm"]
+
+    def __init__(
+        self,
+        decoder_layer: "TransformerDecoderLayer",
+        num_layers: int,
+        norm: nn.Module | None = None,
+    ) -> None:
         super().__init__()
-        self.heads = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(h_feat_dec, h_feat_dec),
-                nn.ReLU(),
-                nn.Linear(h_feat_dec, num_output_channels),
+        # torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
+        self.layers = _get_clones(decoder_layer, num_layers)
+        self.num_layers = num_layers
+        self.norm = norm
+
+    def forward(
+        self,
+        tgt: torch.Tensor,
+        memory: torch.Tensor,
+        tgt_mask: torch.Tensor | None = None,
+        # memory_mask: torch.Tensor | None = None,
+        # tgt_key_padding_mask: torch.Tensor | None = None,
+        memory_key_padding_mask: torch.Tensor | None = None,
+        query_pos: torch.Tensor | None = None,
+        # tgt_is_causal: bool | None = None,
+        # memory_is_causal: bool = False,
+        return_intermediate=False,
+    ) -> torch.Tensor:
+        
+        output = tgt
+        intermediate = []
+
+        # seq_len = _get_seq_len(tgt, self.layers[0].self_attn.batch_first)
+        # tgt_is_causal = _detect_is_causal_mask(tgt_mask, tgt_is_causal, seq_len)
+
+        for mod in self.layers:
+            output = mod(
+                output,
+                memory,
+                # tgt_mask=tgt_mask,
+                # memory_mask=memory_mask,
+                # tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=memory_key_padding_mask,
+                query_pos=query_pos,
+                # tgt_is_causal=tgt_is_causal,
+                # memory_is_causal=memory_is_causal,
             )
-            for _ in range(num_slots)
-        ])
- 
-        # self.multihead_attn = nn.ModuleList([nn.MultiheadAttention(embed_dim, n_heads) for _ in range(num_slots)]) - only useful if you have per node embeddings
+            if return_intermediate:
+                intermediate.append(self.norm(output))
+                
+        if return_intermediate:
+            return torch.stack(intermediate) 
 
-    def forward(self, enc_all_outputs):
-        out = torch.stack([head(enc_all_outputs) for head in self.heads], dim=1)
-        return out
+        if self.norm is not None:
+            output = self.norm(output)
 
-# class CrossAttnDecoder(nn.Module):
-#     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
-#         super().__init__()
-#         self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
-#         self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
-#         self.heads = nn.ModuleList([
-#             nn.Sequential(nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels))
-#             for _ in range(num_slots)
-#         ])
+        return output
 
-#     def forward(self, feat_map):
-#         B, C, H, W = feat_map.shape
-#         tokens = feat_map.flatten(2).transpose(1, 2) 
+class TransformerDecoderLayer(nn.Module):
 
-#         q = self.slot_queries.unsqueeze(0).expand(B, -1, -1) 
-#         attended, _ = self.cross_attn(q, tokens, tokens)   
+    __constants__ = ["norm_first"]
 
-#         return torch.stack([h(attended[:, i, :]) for i, h in enumerate(self.heads)], dim=1)
-    
-# class CrossAttnDecoder(nn.Module):
-#     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
-#         super().__init__()
-#         self.num_slots = num_slots
-#         self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
-#         self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
-#         self.head = nn.Sequential(
-#             nn.Linear(h_feat_dec, h_feat_dec),
-#             nn.ReLU(),
-#             nn.Linear(h_feat_dec, num_output_channels),
-#         )
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        activation: str | Callable[[torch.Tensor], torch.Tensor] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            batch_first=batch_first,
+            bias=bias,
+            **factory_kwargs,
+        )
+        self.multihead_attn = nn.MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            batch_first=batch_first,
+            bias=bias,
+            **factory_kwargs,
+        )
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
-#     def forward(self, feat_map):
-#         B, C, H, W = feat_map.shape
-#         tokens = feat_map.flatten(2).transpose(1, 2)  # (B, H*W, C)
+        self.norm_first = norm_first
+        self.norm1 = nn.LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm2 = nn.LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm3 = nn.LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
 
-#         q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)  # (B, num_slots, C)
-#         attended, _ = self.cross_attn(q, tokens, tokens)      # (B, num_slots, C)
+        # # Legacy string support for activation function.
+        # if isinstance(activation, str):
+        #     self.activation = _get_activation_fn(activation)
+        # else:
+        #     self.activation = activation
 
-#         B, S, Hc = attended.shape
-#         flat = attended.reshape(B * S, Hc)
-#         out = self.head(flat)                # (B*S, num_output_channels)
-#         return out.reshape(B, S, -1)          # (B, num_slots, num_output_channels)
+        if activation == "relu":
+            self.activation = F.relu
+        elif activation == "gelu":
+            self.activation = F.gelu
+        else:
+            self.activation = activation 
 
-# class CrossAttnDecoder(nn.Module):
-#     def __init__(self, h_feat_dec, num_output_channels=7, num_slots=2, num_heads=4):
-#         super().__init__()
-#         self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec) * 0.02)
-#         self.self_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
-#         self.cross_attn = nn.MultiheadAttention(h_feat_dec, num_heads, batch_first=True)
-#         self.head = nn.Sequential(
-#             nn.Linear(h_feat_dec, h_feat_dec), nn.ReLU(), nn.Linear(h_feat_dec, num_output_channels)
-#         )
+    @staticmethod
+    def _with_pos_embed(x, pos):
+        return x if pos is None else x + pos
 
-#     def forward(self, feat_map):
-#         B, C, H, W = feat_map.shape
-#         tokens = feat_map.flatten(2).transpose(1, 2)  # (B, H*W, C)
+    def __setstate__(self, state):
+        if "activation" not in state:
+            state["activation"] = F.relu
+        super().__setstate__(state)
 
-#         q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)  # (B, num_slots, C)
-#         q_self, _ = self.self_attn(q, q, q)
-#         attended, _ = self.cross_attn(q_self, tokens, tokens)      # <-- fixed: use q_self here
+    def forward(
+        self,
+        tgt: torch.Tensor,
+        memory: torch.Tensor,
+        tgt_mask: torch.Tensor | None = None,
+        memory_mask: torch.Tensor | None = None,
+        tgt_key_padding_mask: torch.Tensor | None = None,
+        memory_key_padding_mask: torch.Tensor | None = None,
+        tgt_is_causal: bool = False,
+        memory_is_causal: bool = False,
+        query_pos: torch.Tensor | None = None,
+    ) -> torch.Tensor:
 
-#         B, S, Hc = attended.shape
-#         flat = attended.reshape(B * S, Hc)
-#         out = self.head(flat)
-#         return out.reshape(B, S, -1)
+        x = tgt
+        if self.norm_first:
+            if query_pos is None:
+                # x = x + self._sa_block(
+                #     self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
+                # )
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_mask,
+                #     memory_key_padding_mask,
+                #     memory_is_causal,
+                # )
+
+                print('error')
+                # print('error')
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_key_padding_mask,
+                # )
+                # x = x + self._ff_block(self.norm3(x))
+            else:
+                x = x + self._sa_block(
+                    self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal, query_pos=query_pos
+                )
+                x = x + self._mha_block(
+                    self.norm2(x),
+                    memory,
+                    memory_mask,
+                    memory_key_padding_mask,
+                    memory_is_causal,
+                    query_pos=query_pos,
+                )
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_key_padding_mask,
+                #     query_pos=query_pos,
+                # )
+
+                x = x + self._ff_block(self.norm3(x))
+        else:
+            if query_pos is None:
+                x = self.norm1(
+                    x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal)
+                )
+                x = self.norm2(
+                    x
+                    + self._mha_block(
+                        x, memory, memory_mask, memory_key_padding_mask, memory_is_causal
+                    )
+                )
+                x = self.norm3(x + self._ff_block(x))
+            else:
+                x = tgt
+                x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, query_pos=query_pos))
+                x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask, query_pos=query_pos))
+                x = self.norm3(x + self._ff_block(x))
+
+        return x
+
+    # self-attention block
+    def _sa_block(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None,
+        key_padding_mask: torch.Tensor | None,
+        is_causal: bool = False,
+        query_pos: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if query_pos is None:
+            q = k = x
+        else:
+            q = k = self._with_pos_embed(x, query_pos)
+        x = self.self_attn(
+            # x,
+            # x,
+            # x,
+            q, k, x, 
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            is_causal=is_causal,
+            need_weights=False,
+        )[0]
+        return self.dropout1(x)
+
+    # multihead attention block
+    def _mha_block(
+        self,
+        x: torch.Tensor,
+        mem: torch.Tensor,
+        attn_mask: torch.Tensor | None,
+        key_padding_mask: torch.Tensor | None,
+        is_causal: bool = False,
+        query_pos: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if query_pos is not None:
+            x = self._with_pos_embed(x, query_pos)
+
+        x = self.multihead_attn(
+            x,
+            # self._with_pos_embed(x, query_pos),
+            mem,
+            mem,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            is_causal=is_causal,
+            need_weights=False,
+        )[0]
+        return self.dropout2(x)
+
+### Competitive slot attention
+    # def _mha_block(
+    #     self,
+    #     x: torch.Tensor,                  # [B, S, D]
+    #     mem: torch.Tensor,                # [B, N, D]
+    #     attn_mask: torch.Tensor | None,
+    #     key_padding_mask: torch.Tensor | None,
+    #     is_causal: bool = False,
+    #     query_pos: torch.Tensor | None = None,
+    #     temperature: float = 1.0,
+    # ) -> torch.Tensor:
+    #     if query_pos is not None:
+    #         x = self._with_pos_embed(x, query_pos)
+
+    #     batch_size, num_slots, embed_dim = x.shape
+    #     num_nodes = mem.size(1)
+    #     num_heads = self.multihead_attn.num_heads
+    #     head_dim = embed_dim // num_heads
+
+    #     q_weight, k_weight, v_weight = (
+    #         self.multihead_attn.in_proj_weight.chunk(3)
+    #     )
+
+    #     if self.multihead_attn.in_proj_bias is not None:
+    #         q_bias, k_bias, v_bias = (
+    #             self.multihead_attn.in_proj_bias.chunk(3)
+    #         )
+    #     else:
+    #         q_bias = k_bias = v_bias = None
+
+    #     q = F.linear(x, q_weight, q_bias)
+    #     k = F.linear(mem, k_weight, k_bias)
+    #     v = F.linear(mem, v_weight, v_bias)
+
+    #     q = q.view(
+    #         batch_size, num_slots, num_heads, head_dim
+    #     ).transpose(1, 2)
+
+    #     k = k.view(
+    #         batch_size, num_nodes, num_heads, head_dim
+    #     ).transpose(1, 2)
+
+    #     v = v.view(
+    #         batch_size, num_nodes, num_heads, head_dim
+    #     ).transpose(1, 2)
+
+    #     # [B, H, S, N]
+    #     logits = torch.matmul(
+    #         q,
+    #         k.transpose(-2, -1),
+    #     )
+
+    #     logits = logits / math.sqrt(head_dim)
+    #     logits = logits / temperature
+
+    #     if key_padding_mask is not None:
+    #         valid_nodes = ~key_padding_mask[:, None, None, :]
+
+    #         masked_logits = logits.masked_fill(
+    #             ~valid_nodes,
+    #             -1e9,
+    #         )
+    #     else:
+    #         valid_nodes = None
+    #         masked_logits = logits
+
+    #     standard_attn = torch.softmax(
+    #         masked_logits,
+    #         dim=-1,
+    #     )
+
+    #     assignments = torch.softmax(
+    #         masked_logits,
+    #         dim=-2,
+    #     )
+
+    #     if valid_nodes is not None:
+    #         standard_attn = standard_attn * valid_nodes
+    #         assignments = assignments * valid_nodes
+
+    #         standard_attn = standard_attn / (
+    #             standard_attn.sum(dim=-1, keepdim=True) + 1e-8
+    #         )
+
+    #     competitive_attn = assignments / (
+    #         assignments.sum(dim=-1, keepdim=True) + 1e-8
+    #     )
+
+    #     alpha = 0.1
+
+    #     attn = (
+    #         (1.0 - alpha) * standard_attn
+    #         + alpha * competitive_attn
+    #     )
+
+    #     attn = F.dropout(
+    #         attn,
+    #         p=self.multihead_attn.dropout,
+    #         training=self.training,
+    #     )
+
+    #     output = torch.matmul(attn, v)
+
+    #     output = (
+    #         output.transpose(1, 2)
+    #         .contiguous()
+    #         .view(batch_size, num_slots, embed_dim)
+    #     )
+
+    #     output = self.multihead_attn.out_proj(output)
+
+    #     return self.dropout2(output)
+
+#     # feed forward block
+    def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout3(x)
 
 class CrossAttnDecoder(nn.Module):
     def __init__(
@@ -256,16 +605,21 @@ class CrossAttnDecoder(nn.Module):
         num_heads=4,
         num_layers=3,
         dropout=0.1,
+        reinject = True,
+        aux_loss=True,
     ):
         super().__init__()
 
         self.num_slots = num_slots
+        self.aux_loss=aux_loss
+        self.reinject = reinject
+        # self.slot_queries = nn.Parameter(
+        #     torch.randn(num_slots, h_feat_dec) * 0.02
+        # )
 
-        self.slot_queries = nn.Parameter(
-            torch.randn(num_slots, h_feat_dec) * 0.02
-        )
+        self.slot_queries = nn.Parameter(torch.randn(num_slots, h_feat_dec)) 
 
-        decoder_layer = nn.TransformerDecoderLayer(
+        decoder_layer = TransformerDecoderLayer(
             d_model=h_feat_dec,
             nhead=num_heads,
             dim_feedforward=4 * h_feat_dec,
@@ -275,7 +629,7 @@ class CrossAttnDecoder(nn.Module):
             norm_first=True,
         )
 
-        self.decoder = nn.TransformerDecoder(
+        self.decoder = TransformerDecoder(
             decoder_layer,
             num_layers=num_layers,
             norm=nn.LayerNorm(h_feat_dec),
@@ -289,39 +643,166 @@ class CrossAttnDecoder(nn.Module):
             nn.Linear(h_feat_dec, num_output_channels),
         )
 
-    def forward(self, feat_map):
-        B, C, H, W = feat_map.shape
-        tokens = feat_map.flatten(2).transpose(1, 2)  # (B, H*W, C)
+# sep heads
+        # self.heads = nn.ModuleList([
+        #     nn.Sequential(
+        #         nn.LayerNorm(h_feat_dec),
+        #         nn.Linear(h_feat_dec, h_feat_dec),
+        #         nn.GELU(),
+        #         nn.Linear(h_feat_dec, num_output_channels),
+        #     )
+        #     for _ in range(num_slots)
+        # ])
 
-        queries = self.slot_queries.unsqueeze(0).expand(B, -1, -1)  # (B, num_slots, C)
+
+
+## dir loss
+#         self.output_features = nn.Sequential(
+#             nn.LayerNorm(h_feat_dec),
+#             nn.Linear(h_feat_dec, h_feat_dec),
+#             nn.GELU(),
+#         )
+
+#         # self.position_head = nn.Linear(
+#         #     h_feat_dec,
+#         #     num_output_channels,
+#         # )
+
+#         # self.direction_head = nn.Linear(
+#         #     h_feat_dec,
+#         #     3,
+#         # )
+# ## sep heads with dir 
+#         # self.position_heads = nn.ModuleList([nn.Linear(
+#         #     h_feat_dec,
+#         #     num_output_channels,
+#         # ) for _ in range(num_slots)]) 
+
+#         # self.direction_heads = nn.ModuleList([nn.Linear(
+#         #     h_feat_dec,
+#         #     3,
+#         # ) for _ in range(num_slots)])
+
+
+
+
+    def forward(self, x_m, batch):
+        x_dense, mask = to_dense_batch(x_m, batch)
+
+        batch_size = x_dense.size(0)
+
+        queries = self.slot_queries.unsqueeze(0).expand(
+            batch_size, -1, -1
+        )
+
+        if self.reinject:
+            tgt, query_pos = torch.zeros_like(queries), queries
+        else:
+            tgt = queries
+
 
         decoded = self.decoder(
-            tgt=queries,
-            memory=tokens,
-        )  # (B, num_slots, C)
+            tgt=tgt,
+            memory=x_dense,
+            memory_key_padding_mask=~mask,#
+            query_pos=query_pos if self.reinject else None, ## could amke it a flag
+            return_intermediate=self.aux_loss and self.training,
+        )
 
-        return self.head(decoded)  # (B, num_slots, num_output_channels)
+        return self.head(decoded)
+
+        # return torch.stack(
+        #     [
+        #         self.heads[i](decoded[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
+
+# direction loss run
+    # def forward(self, x_m, batch):
+    #     x_dense, mask = to_dense_batch(x_m, batch)
+
+    #     batch_size = x_dense.size(0)
+
+    #     queries = self.slot_queries.unsqueeze(0).expand(
+    #         batch_size, -1, -1
+    #     )
+
+    #     if self.reinject:
+    #         tgt = torch.zeros_like(queries)
+    #         query_pos = queries
+    #     else:
+    #         tgt = queries
+    #         query_pos = None
+
+    #     decoded = self.decoder(
+    #         tgt=tgt,
+    #         memory=x_dense,
+    #         memory_key_padding_mask=~mask,
+    #         query_pos=query_pos,
+    #         return_intermediate=self.aux_loss and self.training,
+    #     )
+
+
+        # # features = self.output_features(decoded)
+
+        # # positions = self.position_head(features)
+
+        # # directions = F.normalize(
+        # #     self.direction_head(features),
+        # #     p=2,
+        # #     dim=-1,
+        # #     eps=1e-8,
+        # # )
+
+        # # return torch.cat(
+        # #     [positions, directions],
+        # #     dim=-1,
+        # # )
+
+        # features = self.output_features(decoded)
+
+        # positions = torch.stack(
+        #     [
+        #         self.position_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
+
+        # dirs = torch.stack(
+        #     [
+        #         self.direction_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
+
+        # directions = F.normalize(
+        #     dirs,
+        #     p=2,
+        #     dim=-1,
+        #     eps=1e-8,
+        # )
+
+        # return torch.cat(
+        #     [positions, directions],
+        #     dim=-1,
+        # )
+
+
+
+
     
 class EncoderDecoder(nn.Module):
-    """The base class for the encoder--decoder architecture."""
     def __init__(self, encoder, decoder):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
 
     def forward(self, data):
-        enc_all_outputs = self.encoder(data)
-        output = self.decoder(enc_all_outputs)
+        enc_all_outputs, batch = self.encoder(data)
+        output = self.decoder(enc_all_outputs, batch)
 
         return output
-
-# class EncoderDecoder(nn.Module):
-#     def __init__(self, encoder, decoder):
-#         super().__init__()
-#         self.encoder = encoder
-#         self.decoder = decoder
-
-#     def forward(self, data):
-#         feat_map = self.encoder(data)
-#         output = self.decoder(feat_map)
-#         return output

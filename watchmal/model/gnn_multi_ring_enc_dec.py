@@ -528,16 +528,18 @@ class TransformerDecoderLayer(nn.Module):
         x = tgt
         if self.norm_first:
             if query_pos is None:
-                x = x + self._sa_block(
-                    self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
-                )
-                x = x + self._mha_block(
-                    self.norm2(x),
-                    memory,
-                    memory_mask,
-                    memory_key_padding_mask,
-                    memory_is_causal,
-                )
+                # x = x + self._sa_block(
+                #     self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal
+                # )
+                # x = x + self._mha_block(
+                #     self.norm2(x),
+                #     memory,
+                #     memory_mask,
+                #     memory_key_padding_mask,
+                #     memory_is_causal,
+                # )
+
+                print('error')
                 # print('error')
                 # x = x + self._mha_block(
                 #     self.norm2(x),
@@ -610,143 +612,143 @@ class TransformerDecoderLayer(nn.Module):
         )[0]
         return self.dropout1(x)
 
-    # # multihead attention block
-    # def _mha_block(
-    #     self,
-    #     x: torch.Tensor,
-    #     mem: torch.Tensor,
-    #     attn_mask: torch.Tensor | None,
-    #     key_padding_mask: torch.Tensor | None,
-    #     is_causal: bool = False,
-    #     query_pos: torch.Tensor | None = None,
-    # ) -> torch.Tensor:
-    #     if query_pos is not None:
-    #         x = self._with_pos_embed(x, query_pos)
-
-    #     x = self.multihead_attn(
-    #         x,
-    #         # self._with_pos_embed(x, query_pos),
-    #         mem,
-    #         mem,
-    #         attn_mask=attn_mask,
-    #         key_padding_mask=key_padding_mask,
-    #         is_causal=is_causal,
-    #         need_weights=False,
-    #     )[0]
-    #     return self.dropout2(x)
-
-### Competitive slot attention
+    # multihead attention block
     def _mha_block(
         self,
-        x: torch.Tensor,                  # [B, S, D]
-        mem: torch.Tensor,                # [B, N, D]
+        x: torch.Tensor,
+        mem: torch.Tensor,
         attn_mask: torch.Tensor | None,
         key_padding_mask: torch.Tensor | None,
         is_causal: bool = False,
         query_pos: torch.Tensor | None = None,
-        temperature: float = 1.0,
     ) -> torch.Tensor:
         if query_pos is not None:
             x = self._with_pos_embed(x, query_pos)
 
-        batch_size, num_slots, embed_dim = x.shape
-        num_nodes = mem.size(1)
-        num_heads = self.multihead_attn.num_heads
-        head_dim = embed_dim // num_heads
+        x = self.multihead_attn(
+            x,
+            # self._with_pos_embed(x, query_pos),
+            mem,
+            mem,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            is_causal=is_causal,
+            need_weights=False,
+        )[0]
+        return self.dropout2(x)
 
-        q_weight, k_weight, v_weight = (
-            self.multihead_attn.in_proj_weight.chunk(3)
-        )
+### Competitive slot attention
+    # def _mha_block(
+    #     self,
+    #     x: torch.Tensor,                  # [B, S, D]
+    #     mem: torch.Tensor,                # [B, N, D]
+    #     attn_mask: torch.Tensor | None,
+    #     key_padding_mask: torch.Tensor | None,
+    #     is_causal: bool = False,
+    #     query_pos: torch.Tensor | None = None,
+    #     temperature: float = 1.0,
+    # ) -> torch.Tensor:
+    #     if query_pos is not None:
+    #         x = self._with_pos_embed(x, query_pos)
 
-        if self.multihead_attn.in_proj_bias is not None:
-            q_bias, k_bias, v_bias = (
-                self.multihead_attn.in_proj_bias.chunk(3)
-            )
-        else:
-            q_bias = k_bias = v_bias = None
+    #     batch_size, num_slots, embed_dim = x.shape
+    #     num_nodes = mem.size(1)
+    #     num_heads = self.multihead_attn.num_heads
+    #     head_dim = embed_dim // num_heads
 
-        q = F.linear(x, q_weight, q_bias)
-        k = F.linear(mem, k_weight, k_bias)
-        v = F.linear(mem, v_weight, v_bias)
+    #     q_weight, k_weight, v_weight = (
+    #         self.multihead_attn.in_proj_weight.chunk(3)
+    #     )
 
-        q = q.view(
-            batch_size, num_slots, num_heads, head_dim
-        ).transpose(1, 2)
+    #     if self.multihead_attn.in_proj_bias is not None:
+    #         q_bias, k_bias, v_bias = (
+    #             self.multihead_attn.in_proj_bias.chunk(3)
+    #         )
+    #     else:
+    #         q_bias = k_bias = v_bias = None
 
-        k = k.view(
-            batch_size, num_nodes, num_heads, head_dim
-        ).transpose(1, 2)
+    #     q = F.linear(x, q_weight, q_bias)
+    #     k = F.linear(mem, k_weight, k_bias)
+    #     v = F.linear(mem, v_weight, v_bias)
 
-        v = v.view(
-            batch_size, num_nodes, num_heads, head_dim
-        ).transpose(1, 2)
+    #     q = q.view(
+    #         batch_size, num_slots, num_heads, head_dim
+    #     ).transpose(1, 2)
 
-        # [B, H, S, N]
-        logits = torch.matmul(
-            q,
-            k.transpose(-2, -1),
-        )
+    #     k = k.view(
+    #         batch_size, num_nodes, num_heads, head_dim
+    #     ).transpose(1, 2)
 
-        logits = logits / math.sqrt(head_dim)
-        logits = logits / temperature
+    #     v = v.view(
+    #         batch_size, num_nodes, num_heads, head_dim
+    #     ).transpose(1, 2)
 
-        if key_padding_mask is not None:
-            valid_nodes = ~key_padding_mask[:, None, None, :]
+    #     # [B, H, S, N]
+    #     logits = torch.matmul(
+    #         q,
+    #         k.transpose(-2, -1),
+    #     )
 
-            masked_logits = logits.masked_fill(
-                ~valid_nodes,
-                -1e9,
-            )
-        else:
-            valid_nodes = None
-            masked_logits = logits
+    #     logits = logits / math.sqrt(head_dim)
+    #     logits = logits / temperature
 
-        standard_attn = torch.softmax(
-            masked_logits,
-            dim=-1,
-        )
+    #     if key_padding_mask is not None:
+    #         valid_nodes = ~key_padding_mask[:, None, None, :]
 
-        assignments = torch.softmax(
-            masked_logits,
-            dim=-2,
-        )
+    #         masked_logits = logits.masked_fill(
+    #             ~valid_nodes,
+    #             -1e9,
+    #         )
+    #     else:
+    #         valid_nodes = None
+    #         masked_logits = logits
 
-        if valid_nodes is not None:
-            standard_attn = standard_attn * valid_nodes
-            assignments = assignments * valid_nodes
+    #     standard_attn = torch.softmax(
+    #         masked_logits,
+    #         dim=-1,
+    #     )
 
-            standard_attn = standard_attn / (
-                standard_attn.sum(dim=-1, keepdim=True) + 1e-8
-            )
+    #     assignments = torch.softmax(
+    #         masked_logits,
+    #         dim=-2,
+    #     )
 
-        competitive_attn = assignments / (
-            assignments.sum(dim=-1, keepdim=True) + 1e-8
-        )
+    #     if valid_nodes is not None:
+    #         standard_attn = standard_attn * valid_nodes
+    #         assignments = assignments * valid_nodes
 
-        alpha = 0.1
+    #         standard_attn = standard_attn / (
+    #             standard_attn.sum(dim=-1, keepdim=True) + 1e-8
+    #         )
 
-        attn = (
-            (1.0 - alpha) * standard_attn
-            + alpha * competitive_attn
-        )
+    #     competitive_attn = assignments / (
+    #         assignments.sum(dim=-1, keepdim=True) + 1e-8
+    #     )
 
-        attn = F.dropout(
-            attn,
-            p=self.multihead_attn.dropout,
-            training=self.training,
-        )
+    #     alpha = 0.1
 
-        output = torch.matmul(attn, v)
+    #     attn = (
+    #         (1.0 - alpha) * standard_attn
+    #         + alpha * competitive_attn
+    #     )
 
-        output = (
-            output.transpose(1, 2)
-            .contiguous()
-            .view(batch_size, num_slots, embed_dim)
-        )
+    #     attn = F.dropout(
+    #         attn,
+    #         p=self.multihead_attn.dropout,
+    #         training=self.training,
+    #     )
 
-        output = self.multihead_attn.out_proj(output)
+    #     output = torch.matmul(attn, v)
 
-        return self.dropout2(output)
+    #     output = (
+    #         output.transpose(1, 2)
+    #         .contiguous()
+    #         .view(batch_size, num_slots, embed_dim)
+    #     )
+
+    #     output = self.multihead_attn.out_proj(output)
+
+    #     return self.dropout2(output)
 
 #     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
@@ -762,7 +764,7 @@ class CrossAttnDecoder(nn.Module):
         num_heads=4,
         num_layers=3,
         dropout=0.1,
-        reinject = False,
+        reinject = True,
         aux_loss=True,
     ):
         super().__init__()
@@ -800,83 +802,49 @@ class CrossAttnDecoder(nn.Module):
         #     nn.Linear(h_feat_dec, num_output_channels),
         # )
 
-## sep heads
-        # self.heads = nn.ModuleList([
-        #     nn.Sequential(
-        #         nn.LayerNorm(h_feat_dec),
-        #         nn.Linear(h_feat_dec, h_feat_dec),
-        #         nn.GELU(),
-        #         nn.Linear(h_feat_dec, num_output_channels),
-        #     )
-        #     for _ in range(num_slots)
-        # ])
+# sep heads
+        self.heads = nn.ModuleList([
+            nn.Sequential(
+                nn.LayerNorm(h_feat_dec),
+                nn.Linear(h_feat_dec, h_feat_dec),
+                nn.GELU(),
+                nn.Linear(h_feat_dec, num_output_channels),
+            )
+            for _ in range(num_slots)
+        ])
 
 
 
 ## dir loss
-        self.output_features = nn.Sequential(
-            nn.LayerNorm(h_feat_dec),
-            nn.Linear(h_feat_dec, h_feat_dec),
-            nn.GELU(),
-        )
+#         self.output_features = nn.Sequential(
+#             nn.LayerNorm(h_feat_dec),
+#             nn.Linear(h_feat_dec, h_feat_dec),
+#             nn.GELU(),
+#         )
 
-        # self.position_head = nn.Linear(
-        #     h_feat_dec,
-        #     num_output_channels,
-        # )
+#         # self.position_head = nn.Linear(
+#         #     h_feat_dec,
+#         #     num_output_channels,
+#         # )
 
-        # self.direction_head = nn.Linear(
-        #     h_feat_dec,
-        #     3,
-        # )
-## sep heads with dir 
-        self.position_heads = nn.ModuleList([nn.Linear(
-            h_feat_dec,
-            num_output_channels,
-        ) for _ in range(num_slots)]) 
+#         # self.direction_head = nn.Linear(
+#         #     h_feat_dec,
+#         #     3,
+#         # )
+# ## sep heads with dir 
+#         # self.position_heads = nn.ModuleList([nn.Linear(
+#         #     h_feat_dec,
+#         #     num_output_channels,
+#         # ) for _ in range(num_slots)]) 
 
-        self.direction_heads = nn.ModuleList([nn.Linear(
-            h_feat_dec,
-            3,
-        ) for _ in range(num_slots)])
-
-
+#         # self.direction_heads = nn.ModuleList([nn.Linear(
+#         #     h_feat_dec,
+#         #     3,
+#         # ) for _ in range(num_slots)])
 
 
-    # def forward(self, x_m, batch):
-    #     x_dense, mask = to_dense_batch(x_m, batch)
-
-    #     batch_size = x_dense.size(0)
-
-    #     queries = self.slot_queries.unsqueeze(0).expand(
-    #         batch_size, -1, -1
-    #     )
-
-    #     if self.reinject:
-    #         tgt, query_pos = torch.zeros_like(queries), queries
-    #     else:
-    #         tgt = queries
 
 
-    #     decoded = self.decoder(
-    #         tgt=tgt,
-    #         memory=x_dense,
-    #         memory_key_padding_mask=~mask,#
-    #         query_pos=query_pos if self.reinject else None, ## could amke it a flag
-    #         return_intermediate=self.aux_loss and self.training,
-    #     )
-
-    #     return self.head(decoded)
-
-    #     # return torch.stack(
-    #     #     [
-    #     #         self.heads[i](decoded[..., i, :])
-    #     #         for i in range(self.num_slots)
-    #     #     ],
-    #     #     dim=-2,
-    #     # )
-
-# direction loss run
     def forward(self, x_m, batch):
         x_dense, mask = to_dense_batch(x_m, batch)
 
@@ -887,27 +855,91 @@ class CrossAttnDecoder(nn.Module):
         )
 
         if self.reinject:
-            tgt = torch.zeros_like(queries)
-            query_pos = queries
+            tgt, query_pos = torch.zeros_like(queries), queries
         else:
             tgt = queries
-            query_pos = None
+
 
         decoded = self.decoder(
             tgt=tgt,
             memory=x_dense,
-            memory_key_padding_mask=~mask,
-            query_pos=query_pos,
+            memory_key_padding_mask=~mask,#
+            query_pos=query_pos if self.reinject else None, ## could amke it a flag
             return_intermediate=self.aux_loss and self.training,
         )
 
+        # return self.head(decoded)
+
+        return torch.stack(
+            [
+                self.heads[i](decoded[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
+
+# direction loss run
+    # def forward(self, x_m, batch):
+    #     x_dense, mask = to_dense_batch(x_m, batch)
+
+    #     batch_size = x_dense.size(0)
+
+    #     queries = self.slot_queries.unsqueeze(0).expand(
+    #         batch_size, -1, -1
+    #     )
+
+    #     if self.reinject:
+    #         tgt = torch.zeros_like(queries)
+    #         query_pos = queries
+    #     else:
+    #         tgt = queries
+    #         query_pos = None
+
+    #     decoded = self.decoder(
+    #         tgt=tgt,
+    #         memory=x_dense,
+    #         memory_key_padding_mask=~mask,
+    #         query_pos=query_pos,
+    #         return_intermediate=self.aux_loss and self.training,
+    #     )
+
+
+        # # features = self.output_features(decoded)
+
+        # # positions = self.position_head(features)
+
+        # # directions = F.normalize(
+        # #     self.direction_head(features),
+        # #     p=2,
+        # #     dim=-1,
+        # #     eps=1e-8,
+        # # )
+
+        # # return torch.cat(
+        # #     [positions, directions],
+        # #     dim=-1,
+        # # )
 
         # features = self.output_features(decoded)
 
-        # positions = self.position_head(features)
+        # positions = torch.stack(
+        #     [
+        #         self.position_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
+
+        # dirs = torch.stack(
+        #     [
+        #         self.direction_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
         # directions = F.normalize(
-        #     self.direction_head(features),
+        #     dirs,
         #     p=2,
         #     dim=-1,
         #     eps=1e-8,
@@ -917,36 +949,6 @@ class CrossAttnDecoder(nn.Module):
         #     [positions, directions],
         #     dim=-1,
         # )
-
-        features = self.output_features(decoded)
-
-        positions = torch.stack(
-            [
-                self.position_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
-
-        dirs = torch.stack(
-            [
-                self.direction_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
-
-        directions = F.normalize(
-            dirs,
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
-
-        return torch.cat(
-            [positions, directions],
-            dim=-1,
-        )
 
 
 
