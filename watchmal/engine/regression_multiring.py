@@ -533,202 +533,202 @@ class RegressionEngine(ReconstructionEngine):
 
 ## aux loss
 
-    def compute_metrics(self):
-        true_scaled = self.stacked_target
-
-        if self.model_out.dim() == true_scaled.dim() + 1:
-            per_layer_preds = list(self.model_out)        # L tensors of (B, S, C)
-        else:
-            per_layer_preds = [self.model_out]
-
-        layer_losses = []
-        for pred_scaled in per_layer_preds:
-            pairwise_cost = F.huber_loss(
-                pred_scaled.unsqueeze(2),
-                true_scaled.unsqueeze(1),
-                delta=self.criterion.delta,
-                reduction="none",
-            ).mean(dim=-1)
-
-            identity_cost = pairwise_cost[:, 0, 0] + pairwise_cost[:, 1, 1]
-            swap_cost     = pairwise_cost[:, 0, 1] + pairwise_cost[:, 1, 0]
-
-            use_swap = swap_cost < identity_cost
-
-            layer_losses.append(
-                torch.where(use_swap, swap_cost, identity_cost).mean()
-            )
-
-        self.loss = torch.stack(layer_losses).mean()
-
-        # final_loss = layer_losses[-1]
-
-        # if len(layer_losses) > 1:
-        #     auxiliary_loss = torch.stack(layer_losses[:-1]).mean()
-        # else:
-        #     auxiliary_loss = final_loss.new_zeros(())
-
-        # aux_weight = 0.2
-
-        # self.loss = final_loss + aux_weight * auxiliary_loss
-
-        pred_positions = self.predictions["predicted_positions"]
-        true_positions = self.target_dict["positions"]
-
-        matched_true = torch.where(
-            use_swap[:, None, None],
-            true_positions.flip(dims=[1]),
-            true_positions,
-        )
-
-        position_error = torch.linalg.vector_norm(
-            pred_positions - matched_true, dim=-1,
-        )
-
-        return {
-            "loss": self.loss,
-            "position_error_slot0": position_error[:, 0].mean(),
-            "position_error_slot1": position_error[:, 1].mean(),
-            "mean_position_error": position_error.mean(),
-            "swap_fraction": use_swap.float().mean(),
-            "predicted_slot_separation": torch.linalg.vector_norm(
-                pred_positions[:, 0] - pred_positions[:, 1], dim=-1,
-            ).mean(),
-            "true_slot_separation": torch.linalg.vector_norm(
-                true_positions[:, 0] - true_positions[:, 1], dim=-1,
-            ).mean(),
-        }
-
-
-## dir 
     # def compute_metrics(self):
-    #     # Truth targets
-    #     true_positions_scaled = (
-    #         self.target_dict["positions"] - self.offset["positions"]
-    #     ) / self.scale["positions"]
+    #     true_scaled = self.stacked_target
 
-    #     true_directions = F.normalize(
-    #         self.target_dict["directions"],
-    #         p=2,
-    #         dim=-1,
-    #         eps=1e-8,
-    #     )
-
-    #     # Training with aux decoder outputs:
-    #     # [L, B, S, 6]
-    #     # Evaluation:
-    #     # [B, S, 6]
-    #     if self.model_out.dim() == self.stacked_target.dim() + 1:
-    #         per_layer_outputs = list(self.model_out)
+    #     if self.model_out.dim() == true_scaled.dim() + 1:
+    #         per_layer_preds = list(self.model_out)        # L tensors of (B, S, C)
     #     else:
-    #         per_layer_outputs = [self.model_out]
+    #         per_layer_preds = [self.model_out]
 
     #     layer_losses = []
-
-    #     final_use_swap = None
-    #     final_position_loss = None
-    #     final_direction_loss = None
-
-    #     direction_weight = 0.03
-
-    #     for layer_output in per_layer_outputs:
-    #         pred_positions_scaled = layer_output[..., :3]
-
-    #         pred_directions = F.normalize(
-    #             layer_output[..., 3:6],
-    #             p=2,
-    #             dim=-1,
-    #             eps=1e-8,
-    #         )
-
-    #         # Pairwise position cost:
-    #         # [B, predicted slot, truth slot]
-    #         pairwise_position_cost = F.huber_loss(
-    #             pred_positions_scaled.unsqueeze(2),
-    #             true_positions_scaled.unsqueeze(1),
+    #     for pred_scaled in per_layer_preds:
+    #         pairwise_cost = F.huber_loss(
+    #             pred_scaled.unsqueeze(2),
+    #             true_scaled.unsqueeze(1),
     #             delta=self.criterion.delta,
     #             reduction="none",
     #         ).mean(dim=-1)
 
-    #         identity_cost = (
-    #             pairwise_position_cost[:, 0, 0]
-    #             + pairwise_position_cost[:, 1, 1]
-    #         )
-
-    #         swap_cost = (
-    #             pairwise_position_cost[:, 0, 1]
-    #             + pairwise_position_cost[:, 1, 0]
-    #         )
+    #         identity_cost = pairwise_cost[:, 0, 0] + pairwise_cost[:, 1, 1]
+    #         swap_cost     = pairwise_cost[:, 0, 1] + pairwise_cost[:, 1, 0]
 
     #         use_swap = swap_cost < identity_cost
 
-    #         position_loss = torch.where(
-    #             use_swap,
-    #             swap_cost,
-    #             identity_cost,
-    #         ).mean()
-
-    #         # Use the position-derived assignment for directions
-    #         matched_true_directions = torch.where(
-    #             use_swap[:, None, None],
-    #             true_directions.flip(dims=[1]),
-    #             true_directions,
-    #         )
-
-    #         direction_loss = (
-    #             1.0
-    #             - torch.sum(
-    #                 pred_directions * matched_true_directions,
-    #                 dim=-1,
-    #             )
-    #         ).mean()
-
     #         layer_losses.append(
-    #             position_loss
-    #             + direction_weight * direction_loss
+    #             torch.where(use_swap, swap_cost, identity_cost).mean()
     #         )
-
-    #         final_use_swap = use_swap
-    #         final_position_loss = position_loss
-    #         final_direction_loss = direction_loss
 
     #     self.loss = torch.stack(layer_losses).mean()
 
-    #     # Final-layer reporting in physical units
+    #     # final_loss = layer_losses[-1]
+
+    #     # if len(layer_losses) > 1:
+    #     #     auxiliary_loss = torch.stack(layer_losses[:-1]).mean()
+    #     # else:
+    #     #     auxiliary_loss = final_loss.new_zeros(())
+
+    #     # aux_weight = 0.2
+
+    #     # self.loss = final_loss + aux_weight * auxiliary_loss
+
     #     pred_positions = self.predictions["predicted_positions"]
     #     true_positions = self.target_dict["positions"]
 
-    #     matched_true_positions = torch.where(
-    #         final_use_swap[:, None, None],
+    #     matched_true = torch.where(
+    #         use_swap[:, None, None],
     #         true_positions.flip(dims=[1]),
     #         true_positions,
     #     )
 
     #     position_error = torch.linalg.vector_norm(
-    #         pred_positions - matched_true_positions,
-    #         dim=-1,
+    #         pred_positions - matched_true, dim=-1,
     #     )
 
     #     return {
     #         "loss": self.loss,
-    #         "position_loss": final_position_loss,
-    #         "direction_loss": final_direction_loss,
-    #         "weighted_direction_loss": (
-    #             direction_weight * final_direction_loss
-    #         ),
     #         "position_error_slot0": position_error[:, 0].mean(),
     #         "position_error_slot1": position_error[:, 1].mean(),
     #         "mean_position_error": position_error.mean(),
-    #         "swap_fraction": final_use_swap.float().mean(),
+    #         "swap_fraction": use_swap.float().mean(),
     #         "predicted_slot_separation": torch.linalg.vector_norm(
-    #             pred_positions[:, 0] - pred_positions[:, 1],
-    #             dim=-1,
+    #             pred_positions[:, 0] - pred_positions[:, 1], dim=-1,
     #         ).mean(),
     #         "true_slot_separation": torch.linalg.vector_norm(
-    #             true_positions[:, 0] - true_positions[:, 1],
-    #             dim=-1,
+    #             true_positions[:, 0] - true_positions[:, 1], dim=-1,
     #         ).mean(),
     #     }
+
+
+## dir 
+    def compute_metrics(self):
+        # Truth targets
+        true_positions_scaled = (
+            self.target_dict["positions"] - self.offset["positions"]
+        ) / self.scale["positions"]
+
+        true_directions = F.normalize(
+            self.target_dict["directions"],
+            p=2,
+            dim=-1,
+            eps=1e-8,
+        )
+
+        # Training with aux decoder outputs:
+        # [L, B, S, 6]
+        # Evaluation:
+        # [B, S, 6]
+        if self.model_out.dim() == self.stacked_target.dim() + 1:
+            per_layer_outputs = list(self.model_out)
+        else:
+            per_layer_outputs = [self.model_out]
+
+        layer_losses = []
+
+        final_use_swap = None
+        final_position_loss = None
+        final_direction_loss = None
+
+        direction_weight = 0.05
+
+        for layer_output in per_layer_outputs:
+            pred_positions_scaled = layer_output[..., :3]
+
+            pred_directions = F.normalize(
+                layer_output[..., 3:6],
+                p=2,
+                dim=-1,
+                eps=1e-8,
+            )
+
+            # Pairwise position cost:
+            # [B, predicted slot, truth slot]
+            pairwise_position_cost = F.huber_loss(
+                pred_positions_scaled.unsqueeze(2),
+                true_positions_scaled.unsqueeze(1),
+                delta=self.criterion.delta,
+                reduction="none",
+            ).mean(dim=-1)
+
+            identity_cost = (
+                pairwise_position_cost[:, 0, 0]
+                + pairwise_position_cost[:, 1, 1]
+            )
+
+            swap_cost = (
+                pairwise_position_cost[:, 0, 1]
+                + pairwise_position_cost[:, 1, 0]
+            )
+
+            use_swap = swap_cost < identity_cost
+
+            position_loss = torch.where(
+                use_swap,
+                swap_cost,
+                identity_cost,
+            ).mean()
+
+            # Use the position-derived assignment for directions
+            matched_true_directions = torch.where(
+                use_swap[:, None, None],
+                true_directions.flip(dims=[1]),
+                true_directions,
+            )
+
+            direction_loss = (
+                1.0
+                - torch.sum(
+                    pred_directions * matched_true_directions,
+                    dim=-1,
+                )
+            ).mean()
+
+            layer_losses.append(
+                position_loss
+                + direction_weight * direction_loss
+            )
+
+            final_use_swap = use_swap
+            final_position_loss = position_loss
+            final_direction_loss = direction_loss
+
+        self.loss = torch.stack(layer_losses).mean()
+
+        # Final-layer reporting in physical units
+        pred_positions = self.predictions["predicted_positions"]
+        true_positions = self.target_dict["positions"]
+
+        matched_true_positions = torch.where(
+            final_use_swap[:, None, None],
+            true_positions.flip(dims=[1]),
+            true_positions,
+        )
+
+        position_error = torch.linalg.vector_norm(
+            pred_positions - matched_true_positions,
+            dim=-1,
+        )
+
+        return {
+            "loss": self.loss,
+            "position_loss": final_position_loss,
+            "direction_loss": final_direction_loss,
+            "weighted_direction_loss": (
+                direction_weight * final_direction_loss
+            ),
+            "position_error_slot0": position_error[:, 0].mean(),
+            "position_error_slot1": position_error[:, 1].mean(),
+            "mean_position_error": position_error.mean(),
+            "swap_fraction": final_use_swap.float().mean(),
+            "predicted_slot_separation": torch.linalg.vector_norm(
+                pred_positions[:, 0] - pred_positions[:, 1],
+                dim=-1,
+            ).mean(),
+            "true_slot_separation": torch.linalg.vector_norm(
+                true_positions[:, 0] - true_positions[:, 1],
+                dim=-1,
+            ).mean(),
+        }
 
     def save_state(self, suffix="", name=None):
         self.state_data["target_sizes"] = self.target_sizes
