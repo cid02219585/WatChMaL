@@ -5,6 +5,7 @@ Utility functions for plotting
 import matplotlib
 from matplotlib import pyplot as plt
 import analysis.utils.binning as bins
+import numpy as np
 
 
 def combine_legends(ax):
@@ -93,3 +94,92 @@ def plot_binned_values(ax, func, values, binning, selection=None, errors=False, 
         y = func(binned_values, errors)
         plot_args.setdefault('marker', 'o')
         ax.plot(x, y, **plot_args)
+        
+# def plot_binned_values_2d(ax, func, values, binning_1, binning_2, selection=None, errors=False, x_errors=True, **plot_args):
+    
+# #     values # [1,5,3,]
+# #     binning_1[0] # bin array [0,2,4,6,10]
+    
+# #     binning_1[1] # [1,3,1,2,5]
+# #     binning_2[1] # [1,2,4,5,1]
+    
+#     plot_args.setdefault('lw', 2)
+# #     binned_values_1 = bins.apply_binning(values, binning_1, selection) # [[2,2,3], [1,3]]
+# #     binned_values_2 = bins.apply_binning(values, binning_2, selection)
+
+# #     arr = [[[] for _ in range(binning_1[0].shape[0])] for _ in range(binning_2[0].shape[0])]
+
+# #     for i in range(len(binning_1[0]):
+# #         for j in range(len(binning_2[0])):
+# #             mask = (binning_1[1] == i) & (binning_2[1] == j)
+# #             arr[i][j] = values[mask]
+
+#     arr = [[[] for _ in range(binning_1[0].shape[0])] for _ in range(binning_2[0].shape[0])]
+
+#     for i in range(len(values)):
+#         bin_1 = binning_1[i]
+#         bin_2 = binning_2[i]
+#         arr[bin_1][bin_2].append(values[i])
+        
+    
+#     x = bins.bin_centres(binning_1[0]) 
+#     y = bins.bin_centres(binning_2[0]) 
+
+#     vals = func(arr, errors)
+
+#     im = ax.imshow(vals)
+
+def plot_binned_values_2d(
+    ax,
+    func,
+    values,
+    binning_1,
+    binning_2,
+    selection=None,
+    errors=False,
+    **plot_args,
+):
+    values = np.asarray(values)
+
+    if selection is None:
+        selection = np.ones(len(values), dtype=bool)
+
+    selected_values = values[selection]
+    bin_indices_1 = binning_1[1][selection]
+    bin_indices_2 = binning_2[1][selection]
+
+    n_bins_1 = len(binning_1[0]) - 1
+    n_bins_2 = len(binning_2[0]) - 1
+
+    arr = [
+        [[] for _ in range(n_bins_1)]
+        for _ in range(n_bins_2)
+    ]
+
+    for value, bin_1, bin_2 in zip(
+        selected_values,
+        bin_indices_1,
+        bin_indices_2,
+    ):
+        if (
+            1 <= bin_1 <= n_bins_1
+            and 1 <= bin_2 <= n_bins_2
+        ):
+            arr[bin_2 - 1][bin_1 - 1].append(value)
+
+    vals = func(arr, errors)
+
+    im = ax.imshow(
+        vals,
+        origin="lower",
+        aspect="auto",
+        extent=[
+            binning_1[0][0],
+            binning_1[0][-1],
+            binning_2[0][0],
+            binning_2[0][-1],
+        ],
+        **plot_args,
+    )
+
+    return im

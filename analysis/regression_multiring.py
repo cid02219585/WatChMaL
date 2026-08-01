@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from analysis.read_multiring import WatChMaLOutput
 import watchmal.utils.math as math
 import analysis.utils.binning as bins
-from analysis.utils.plotting import plot_binned_values
+from analysis.utils.plotting import plot_binned_values, plot_binned_values_2d
 
 
 def plot_histograms(runs, quantity, selection=None, ax=None, fig_size=None, x_label="", y_label="", legend='best', **hist_args):
@@ -115,6 +115,103 @@ def plot_resolution_profile(runs, quantity, binning, selection=None, ax=None, fi
     if y_lim is not None:
         ax.set_ylim(y_lim)
     return fig, ax
+
+# def plot_resolution_profile_2d(runs, quantity, binning_1, binning_2, selection=None, ax=None, fig_size=None, x_label="", y_label="",
+#                             legend='best', y_lim=None, **plot_args):
+#     if ax is None:
+#         fig, ax = plt.subplots(figsize=fig_size)
+#     else:
+#         fig = ax.get_figure()
+#     for r in runs:
+#         args = {**plot_args, **r.plot_args}
+#         r.plot_binned_resolution_2d(quantity, ax, binning_1, binning_2, selection, **args)
+#     ax.set_xlabel(x_label)
+#     ax.set_ylabel(y_label)
+#     if legend:
+#         ax.legend(loc=legend)
+#     if y_lim is not None:
+#         ax.set_ylim(y_lim)
+#     return fig, ax
+
+def plot_resolution_profile_2d(
+    runs,
+    quantity,
+    binning_1,
+    binning_2,
+    selection=None,
+    axes=None,
+    fig_size=None,
+    x_label="",
+    y_label="",
+    cbar_label="Resolution",
+    vmin=None,
+    vmax=None,
+    **plot_args,
+):
+    n_runs = len(runs)
+
+    if axes is None:
+        if fig_size is None:
+            fig_size = (6 * n_runs, 5)
+
+        fig, axes = plt.subplots(
+            1,
+            n_runs,
+            figsize=fig_size,
+            squeeze=False,
+        )
+
+        axes = axes[0]
+    else:
+        axes = np.atleast_1d(axes)
+        fig = axes[0].get_figure()
+
+    images = []
+
+    for ax, run in zip(axes, runs):
+        args = {
+            **plot_args,
+            **run.plot_args,
+        }
+
+        # Remove ordinary line-plot arguments that imshow
+        # does not understand.
+        args.pop("label", None)
+        args.pop("marker", None)
+        args.pop("linestyle", None)
+        args.pop("lw", None)
+
+        image = run.plot_binned_resolution_2d(
+            quantity,
+            ax,
+            binning_1,
+            binning_2,
+            selection,
+            vmin=vmin,
+            vmax=vmax,
+            **args,
+        )
+
+        images.append(image)
+
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+
+        # Adapt this depending on how your run name is stored.
+        ax.set_title(
+            getattr(run, "label", getattr(run, "name", ""))
+        )
+
+    # One shared colour bar
+    fig.colorbar(
+        images[0],
+        ax=axes.tolist(),
+        label=cbar_label,
+    )
+
+    fig.tight_layout()
+
+    return fig, axes
 
 
 def plot_bias_profile(runs, quantity, binning, selection=None, ax=None, fig_size=None, x_label="", y_label="",
@@ -335,6 +432,36 @@ class RegressionRun(ABC):
             selection = self.selection
         values = self.get_quantity(quantity)
         return plot_binned_values(ax, bins.binned_resolutions, values, binning, selection, errors, x_errors, **plot_args)
+    
+#     def plot_binned_resolution_2d(self, quantity, ax, binning_1, binning_2, selection=None, errors=False, x_errors=True, **plot_args):
+#         if selection is None:
+#             selection = self.selection
+#         values = self.get_quantity(quantity)
+#         return plot_binned_values_2d(ax, bins.binned_resolutions_2d, values, binning_1, binning_2, selection, errors, x_errors, **plot_args)
+
+    def plot_binned_resolution_2d(
+        self,
+        quantity,
+        ax,
+        binning_1,
+        binning_2,
+        selection=None,
+        **plot_args,
+    ):
+        if selection is None:
+            selection = self.selection
+
+        values = self.get_quantity(quantity)
+
+        return plot_binned_values_2d(
+            ax,
+            bins.binned_resolutions_2d,
+            values,
+            binning_1,
+            binning_2,
+            selection,
+            **plot_args,
+        )
 
     def plot_binned_bias(self, quantity, ax, binning, selection=None, errors=False, x_errors=True, **plot_args):
         """

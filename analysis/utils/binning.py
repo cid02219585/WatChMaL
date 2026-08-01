@@ -67,6 +67,8 @@ def apply_binning(values, binning, selection=...):
     list of np.ndarray
         List of arrays of values assigned to each bin
     """
+    if len(values) // len(selection) == 2:
+        selection = np.concatenate((selection, selection))
     data = values[selection]
     data_bins = binning[1][selection]
     return [data[data_bins == b] for b in range(1, binning[0].size)]
@@ -127,6 +129,21 @@ def binned_resolutions(binned_residuals, return_errors=True):
     else:
         return resolutions
 
+# def binned_resolutions_2d(arr, return_errors=True):
+#     resolutions = np.array([[np.nanquantile(np.abs(arr[x,y]), 0.68) for x in arr.shape[0] for y in arr.shape[1]])
+    
+#     return resolutions
+
+def binned_resolutions_2d(arr, return_errors=False):
+    return np.array([
+        [
+            np.nanquantile(np.abs(cell), 0.68)
+            if len(cell) > 0
+            else np.nan
+            for cell in row
+        ]
+        for row in arr
+    ])
 
 def binned_quantiles(binned_values, quantile):
     """
