@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 
 class WatChMaLOutput(ABC, metaclass=ABCMeta):
     """Base class for reading in results of a WatChMaL run."""
-    def __init__(self, directory, ring, indices=None):
+    def __init__(self, directory, indices=None):
         """
         Create an object holding results of a WatChMaL run, given the run output directory
 
@@ -23,7 +23,6 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
         """
         self.directory = directory
         self.indices = indices
-        self.ring=ring
         self._training_log = None
         self._log_train = None
         self._train_log_epoch = None
@@ -130,16 +129,7 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
             sorted_outputs[intersection[1]] = outputs[intersection[2]]
             sorted_outputs = sorted_outputs.squeeze()
  
-        if apply_swap and getattr(self, "use_swap", None) is not None:
-            mask = self.use_swap.reshape((-1,) + (1,) * (sorted_outputs.ndim - 1))
-            sorted_outputs = np.where(mask, sorted_outputs[:, ::-1], sorted_outputs)
- 
-        if select_ring and self.ring is not None:
-            outputs = sorted_outputs[:, self.ring]
-        else:
-            outputs = sorted_outputs
- 
-        return outputs.squeeze()
+        return sorted_outputs
 
     def read_training_log_from_csv(self, directory):
         """

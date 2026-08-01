@@ -657,21 +657,21 @@ class CrossAttnDecoder(nn.Module):
 
 
 ## dir loss
-        # self.output_features = nn.Sequential(
-        #     nn.LayerNorm(h_feat_dec),
-        #     nn.Linear(h_feat_dec, h_feat_dec),
-        #     nn.GELU(),
-        # )
+        self.output_features = nn.Sequential(
+            nn.LayerNorm(h_feat_dec),
+            nn.Linear(h_feat_dec, h_feat_dec),
+            nn.GELU(),
+        )
 
-        # self.position_head = nn.Linear(
-        #     h_feat_dec,
-        #     num_output_channels,
-        # )
+        self.position_head = nn.Linear(
+            h_feat_dec,
+            num_output_channels,
+        )
 
-        # self.direction_head = nn.Linear(
-        #     h_feat_dec,
-        #     3,
-        # )
+        self.direction_head = nn.Linear(
+            h_feat_dec,
+            3,
+        )
 # ## sep heads with dir 
 #         # self.position_heads = nn.ModuleList([nn.Linear(
 #         #     h_feat_dec,
@@ -702,7 +702,7 @@ class CrossAttnDecoder(nn.Module):
             query_pos=query_pos,
             return_intermediate=self.aux_loss and self.training,
         )
-        return self.head(decoded)
+        # return self.head(decoded)
 
     #     # return torch.stack(
     #     #     [
@@ -714,51 +714,51 @@ class CrossAttnDecoder(nn.Module):
 
 # direction loss run
 
-        # features = self.output_features(decoded)
+        features = self.output_features(decoded)
 
-        # positions = self.position_head(features)
+        positions = self.position_head(features)
 
-        # directions = F.normalize(
-        #     self.direction_head(features),
-        #     p=2,
-        #     dim=-1,
-        #     eps=1e-8,
-        # )
+        directions = F.normalize(
+            self.direction_head(features),
+            p=2,
+            dim=-1,
+            eps=1e-8,
+        )
 
-        # return torch.cat(
-        #     [positions, directions],
-        #     dim=-1,
-        # )
+        return torch.cat(
+            [positions, directions],
+            dim=-1,
+        )
 
-        # features = self.output_features(decoded)
+        features = self.output_features(decoded)
 
-        # positions = torch.stack(
-        #     [
-        #         self.position_heads[i](features[..., i, :])
-        #         for i in range(self.num_slots)
-        #     ],
-        #     dim=-2,
-        # )
+        positions = torch.stack(
+            [
+                self.position_heads[i](features[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
 
-        # dirs = torch.stack(
-        #     [
-        #         self.direction_heads[i](features[..., i, :])
-        #         for i in range(self.num_slots)
-        #     ],
-        #     dim=-2,
-        # )
+        dirs = torch.stack(
+            [
+                self.direction_heads[i](features[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
 
-        # directions = F.normalize(
-        #     dirs,
-        #     p=2,
-        #     dim=-1,
-        #     eps=1e-8,
-        # )
+        directions = F.normalize(
+            dirs,
+            p=2,
+            dim=-1,
+            eps=1e-8,
+        )
 
-        # return torch.cat(
-        #     [positions, directions],
-        #     dim=-1,
-        # )
+        return torch.cat(
+            [positions, directions],
+            dim=-1,
+        )
 
 
 
