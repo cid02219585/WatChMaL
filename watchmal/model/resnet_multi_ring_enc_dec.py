@@ -730,35 +730,35 @@ class CrossAttnDecoder(nn.Module):
             dim=-1,
         )
 
-        features = self.output_features(decoded)
+        # features = self.output_features(decoded)
 
-        positions = torch.stack(
-            [
-                self.position_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # positions = torch.stack(
+        #     [
+        #         self.position_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
-        dirs = torch.stack(
-            [
-                self.direction_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # dirs = torch.stack(
+        #     [
+        #         self.direction_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
-        directions = F.normalize(
-            dirs,
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
+        # directions = F.normalize(
+        #     dirs,
+        #     p=2,
+        #     dim=-1,
+        #     eps=1e-8,
+        # )
 
-        return torch.cat(
-            [positions, directions],
-            dim=-1,
-        )
+        # return torch.cat(
+        #     [positions, directions],
+        #     dim=-1,
+        # )
 
 
 
