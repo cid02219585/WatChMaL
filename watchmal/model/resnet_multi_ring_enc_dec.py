@@ -636,42 +636,42 @@ class CrossAttnDecoder(nn.Module):
         )
 
         # Shared head across slots
-        self.head = nn.Sequential(
-            nn.LayerNorm(h_feat_dec),
-            nn.Linear(h_feat_dec, h_feat_dec),
-            nn.GELU(),
-            nn.Linear(h_feat_dec, num_output_channels),
-        )
+        # self.head = nn.Sequential(
+        #     nn.LayerNorm(h_feat_dec),
+        #     nn.Linear(h_feat_dec, h_feat_dec),
+        #     nn.GELU(),
+        #     nn.Linear(h_feat_dec, num_output_channels),
+        # )
 
 # sep heads
-        # self.heads = nn.ModuleList([
-        #     nn.Sequential(
-        #         nn.LayerNorm(h_feat_dec),
-        #         nn.Linear(h_feat_dec, h_feat_dec),
-        #         nn.GELU(),
-        #         nn.Linear(h_feat_dec, num_output_channels),
-        #     )
-        #     for _ in range(num_slots)
-        # ])
+        self.heads = nn.ModuleList([
+            nn.Sequential(
+                nn.LayerNorm(h_feat_dec),
+                nn.Linear(h_feat_dec, h_feat_dec),
+                nn.GELU(),
+                nn.Linear(h_feat_dec, num_output_channels),
+            )
+            for _ in range(num_slots)
+        ])
 
 
 
 ## dir loss
-        self.output_features = nn.Sequential(
-            nn.LayerNorm(h_feat_dec),
-            nn.Linear(h_feat_dec, h_feat_dec),
-            nn.GELU(),
-        )
+        # self.output_features = nn.Sequential(
+        #     nn.LayerNorm(h_feat_dec),
+        #     nn.Linear(h_feat_dec, h_feat_dec),
+        #     nn.GELU(),
+        # )
 
-        self.position_head = nn.Linear(
-            h_feat_dec,
-            num_output_channels,
-        )
+        # self.position_head = nn.Linear(
+        #     h_feat_dec,
+        #     num_output_channels,
+        # )
 
-        self.direction_head = nn.Linear(
-            h_feat_dec,
-            3,
-        )
+        # self.direction_head = nn.Linear(
+        #     h_feat_dec,
+        #     3,
+        # )
 # ## sep heads with dir 
 #         # self.position_heads = nn.ModuleList([nn.Linear(
 #         #     h_feat_dec,
@@ -704,31 +704,31 @@ class CrossAttnDecoder(nn.Module):
         )
         # return self.head(decoded)
 
-    #     # return torch.stack(
-    #     #     [
-    #     #         self.heads[i](decoded[..., i, :])
-    #     #         for i in range(self.num_slots)
-    #     #     ],
-    #     #     dim=-2,
-    #     # )
+        return torch.stack(
+            [
+                self.heads[i](decoded[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
 
 # direction loss run
 
-        features = self.output_features(decoded)
+        # features = self.output_features(decoded)
 
-        positions = self.position_head(features)
+        # positions = self.position_head(features)
 
-        directions = F.normalize(
-            self.direction_head(features),
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
+        # directions = F.normalize(
+        #     self.direction_head(features),
+        #     p=2,
+        #     dim=-1,
+        #     eps=1e-8,
+        # )
 
-        return torch.cat(
-            [positions, directions],
-            dim=-1,
-        )
+        # return torch.cat(
+        #     [positions, directions],
+        #     dim=-1,
+        # )
 
         # features = self.output_features(decoded)
 
