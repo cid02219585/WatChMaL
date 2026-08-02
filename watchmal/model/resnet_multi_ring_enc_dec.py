@@ -636,23 +636,23 @@ class CrossAttnDecoder(nn.Module):
         )
 
         # Shared head across slots
-        # self.head = nn.Sequential(
-        #     nn.LayerNorm(h_feat_dec),
-        #     nn.Linear(h_feat_dec, h_feat_dec),
-        #     nn.GELU(),
-        #     nn.Linear(h_feat_dec, num_output_channels),
-        # )
+        self.head = nn.Sequential(
+            nn.LayerNorm(h_feat_dec),
+            nn.Linear(h_feat_dec, h_feat_dec),
+            nn.GELU(),
+            nn.Linear(h_feat_dec, num_output_channels),
+        )
 
 # sep heads
-        self.heads = nn.ModuleList([
-            nn.Sequential(
-                nn.LayerNorm(h_feat_dec),
-                nn.Linear(h_feat_dec, h_feat_dec),
-                nn.GELU(),
-                nn.Linear(h_feat_dec, num_output_channels),
-            )
-            for _ in range(num_slots)
-        ])
+        # self.heads = nn.ModuleList([
+        #     nn.Sequential(
+        #         nn.LayerNorm(h_feat_dec),
+        #         nn.Linear(h_feat_dec, h_feat_dec),
+        #         nn.GELU(),
+        #         nn.Linear(h_feat_dec, num_output_channels),
+        #     )
+        #     for _ in range(num_slots)
+        # ])
 
 
 
@@ -702,15 +702,15 @@ class CrossAttnDecoder(nn.Module):
             query_pos=query_pos,
             return_intermediate=self.aux_loss and self.training,
         )
-        # return self.head(decoded)
+        return self.head(decoded)
 
-        return torch.stack(
-            [
-                self.heads[i](decoded[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # return torch.stack(
+        #     [
+        #         self.heads[i](decoded[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
 # direction loss run
 
