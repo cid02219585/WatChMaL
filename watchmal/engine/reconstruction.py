@@ -229,7 +229,7 @@ class ReconstructionEngine(ABC):
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.clip_grad_norm)
         self.optimizer.step()  # step params
 
-    def train(self, epochs=0, val_interval=20, num_val_batches=4, checkpointing=False, save_interval=None):
+    def train(self, epochs=0, val_interval=20, num_val_batches=4, checkpointing=False, save_interval=None, resume=False):
         """
         Train the model on the training set. The best state is always saved during training.
 
@@ -252,9 +252,12 @@ class ReconstructionEngine(ABC):
         self.model.train()
         # initialize epoch and iteration counters
         self.epoch = 0
-        self.iteration = 0
-        # keep track of the validation loss
-        self.best_validation_loss = np.inf
+        # self.iteration = 0
+        # # keep track of the validation loss
+        # self.best_validation_loss = np.inf
+        if not resume:
+            self.iteration = 0
+            self.best_validation_loss = np.inf
         # initialize the iterator over the validation set
         val_iter = iter(self.data_loaders["validation"])
         # global training loop for multiple epochs

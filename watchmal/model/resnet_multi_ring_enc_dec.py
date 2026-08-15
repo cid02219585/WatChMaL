@@ -172,6 +172,12 @@ class ResNet_encoder(nn.Module):
 def resnet50_encoder(**kwargs):
     return ResNet_encoder(Bottleneck, [3, 4, 6, 3], **kwargs)
 
+def resnet18_encoder(**kwargs):
+    return ResNet_encoder(BasicBlock, [2, 2, 2, 2], **kwargs)
+
+
+def resnet34_encoder(**kwargs):
+    return ResNet_encoder(BasicBlock, [3, 4, 6, 3], **kwargs)
 
 
 
@@ -702,7 +708,7 @@ class CrossAttnDecoder(nn.Module):
             query_pos=query_pos,
             return_intermediate=self.aux_loss and self.training,
         )
-        # return self.head(decoded)
+        return self.head(decoded)
 
         # return torch.stack(
         #     [
@@ -730,35 +736,35 @@ class CrossAttnDecoder(nn.Module):
         #     dim=-1,
         # )
 
-        features = self.output_features(decoded)
+        # features = self.output_features(decoded)
 
-        positions = torch.stack(
-            [
-                self.position_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # positions = torch.stack(
+        #     [
+        #         self.position_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
-        dirs = torch.stack(
-            [
-                self.direction_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # dirs = torch.stack(
+        #     [
+        #         self.direction_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
-        directions = F.normalize(
-            dirs,
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
+        # directions = F.normalize(
+        #     dirs,
+        #     p=2,
+        #     dim=-1,
+        #     eps=1e-8,
+        # )
 
-        return torch.cat(
-            [positions, directions],
-            dim=-1,
-        )
+        # return torch.cat(
+        #     [positions, directions],
+        #     dim=-1,
+        # )
 
 
 
@@ -768,10 +774,79 @@ class EncoderDecoder(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.input_proj = nn.Conv2d(enc_channels, h_feat_dec, kernel_size=1)
+        self.memory_norm = nn.LayerNorm(h_feat_dec)
+
 
     def forward(self, data):
         feat = self.encoder(data)              
         feat = self.input_proj(feat)       
         B, C, H, W = feat.shape
         x_dense = feat.flatten(2).transpose(1, 2)
+        x_dense = self.memory_norm(x_dense)
         return self.decoder(x_dense)
+    
+
+# class EncoderDecoder(nn.Module):
+#     def __init__(
+#         self,
+#         encoder,
+#         decoder,
+#         enc_channels=2048,
+#         h_feat_dec=128,
+#     ):
+#         super().__init__()
+
+#         self.encoder = encoder
+#         self.decoder = decoder
+#         self.h_feat_dec = h_feat_dec
+
+#         self.input_proj = nn.Conv2d(
+#             enc_channels,
+#             h_feat_dec,
+#             kernel_size=1,
+#         )
+
+#         self.row_embed = None
+#         self.col_embed = None
+
+#     def forward(self, data):
+#         feat = self.encoder(data)
+#         feat = self.input_proj(feat)
+
+#         B, C, H, W = feat.shape
+
+#         # Initialise once, using the actual ResNet output shape
+#         if self.row_embed is None:
+#             self.row_embed = nn.Embedding(
+#                 H,
+#                 self.h_feat_dec // 2,
+#             ).to(feat.device)
+
+#             self.col_embed = nn.Embedding(
+#                 W // 2,
+#                 self.h_feat_dec // 2,
+#             ).to(feat.device)
+
+#         rows = self.row_embed(
+#             torch.arange(H, device=feat.device)
+#         )
+
+#         cols = self.col_embed(
+#             torch.arange(W, device=feat.device) % (W // 2)
+#         )
+
+#         pos = torch.cat(
+#             [
+#                 cols.unsqueeze(0).expand(H, -1, -1),
+#                 rows.unsqueeze(1).expand(-1, W, -1),
+#             ],
+#             dim=-1,
+#         )
+
+#         pos = pos.permute(2, 0, 1).unsqueeze(0)
+
+#         feat = feat + pos
+
+#         x_dense = feat.flatten(2).transpose(1, 2)
+
+#         return self.decoder(x_dense)
