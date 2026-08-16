@@ -663,21 +663,21 @@ class CrossAttnDecoder(nn.Module):
 
 
 ## dir loss
-        # self.output_features = nn.Sequential(
-        #     nn.LayerNorm(h_feat_dec),
-        #     nn.Linear(h_feat_dec, h_feat_dec),
-        #     nn.GELU(),
-        # )
+        self.output_features = nn.Sequential(
+            nn.LayerNorm(h_feat_dec),
+            nn.Linear(h_feat_dec, h_feat_dec),
+            nn.GELU(),
+        )
 
-        # self.position_head = nn.Linear(
-        #     h_feat_dec,
-        #     num_output_channels,
-        # )
+        self.position_head = nn.Linear(
+            h_feat_dec,
+            num_output_channels,
+        )
 
-        # self.direction_head = nn.Linear(
-        #     h_feat_dec,
-        #     3,
-        # )
+        self.direction_head = nn.Linear(
+            h_feat_dec,
+            3,
+        )
 # ## sep heads with dir 
         # self.position_heads = nn.ModuleList([nn.Linear(
         #     h_feat_dec,
@@ -708,7 +708,7 @@ class CrossAttnDecoder(nn.Module):
             query_pos=query_pos,
             return_intermediate=self.aux_loss and self.training,
         )
-        return self.head(decoded)
+        # return self.head(decoded)
 
         # return torch.stack(
         #     [
@@ -720,21 +720,21 @@ class CrossAttnDecoder(nn.Module):
 
 # direction loss run
 
-        # features = self.output_features(decoded)
+        features = self.output_features(decoded)
 
-        # positions = self.position_head(features)
+        positions = self.position_head(features)
 
-        # directions = F.normalize(
-        #     self.direction_head(features),
-        #     p=2,
-        #     dim=-1,
-        #     eps=1e-8,
-        # )
+        directions = F.normalize(
+            self.direction_head(features),
+            p=2,
+            dim=-1,
+            eps=1e-8,
+        )
 
-        # return torch.cat(
-        #     [positions, directions],
-        #     dim=-1,
-        # )
+        return torch.cat(
+            [positions, directions],
+            dim=-1,
+        )
 
         # features = self.output_features(decoded)
 
@@ -774,7 +774,7 @@ class EncoderDecoder(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.input_proj = nn.Conv2d(enc_channels, h_feat_dec, kernel_size=1)
-        self.memory_norm = nn.LayerNorm(h_feat_dec)
+        # self.memory_norm = nn.LayerNorm(h_feat_dec)
 
 
     def forward(self, data):
@@ -782,7 +782,7 @@ class EncoderDecoder(nn.Module):
         feat = self.input_proj(feat)       
         B, C, H, W = feat.shape
         x_dense = feat.flatten(2).transpose(1, 2)
-        x_dense = self.memory_norm(x_dense)
+        # x_dense = self.memory_norm(x_dense)
         return self.decoder(x_dense)
     
 

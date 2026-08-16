@@ -11,3 +11,5 @@ engine:
   target_scale_factor:
     positions: 1
     directions: 0.01
+
+resume_from: null

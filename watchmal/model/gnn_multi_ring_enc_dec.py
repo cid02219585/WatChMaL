@@ -803,15 +803,15 @@ class CrossAttnDecoder(nn.Module):
         # )
 
 # sep heads
-        self.heads = nn.ModuleList([
-            nn.Sequential(
-                nn.LayerNorm(h_feat_dec),
-                nn.Linear(h_feat_dec, h_feat_dec),
-                nn.GELU(),
-                nn.Linear(h_feat_dec, num_output_channels),
-            )
-            for _ in range(num_slots)
-        ])
+        # self.heads = nn.ModuleList([
+        #     nn.Sequential(
+        #         nn.LayerNorm(h_feat_dec),
+        #         nn.Linear(h_feat_dec, h_feat_dec),
+        #         nn.GELU(),
+        #         nn.Linear(h_feat_dec, num_output_channels),
+        #     )
+        #     for _ in range(num_slots)
+        # ])
 
 
 

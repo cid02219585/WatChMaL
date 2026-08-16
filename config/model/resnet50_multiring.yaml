@@ -4,7 +4,8 @@ encoder:
   _target_: watchmal.model.resnet_multi_ring_enc_dec.resnet50_encoder
   num_input_channels: 41
   conv_pad_mode: circular
-
+  group_norm: True
+  
 decoder:
   _target_: watchmal.model.resnet_multi_ring_enc_dec.CrossAttnDecoder
   h_feat_dec: 128
