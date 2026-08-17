@@ -669,25 +669,25 @@ class CrossAttnDecoder(nn.Module):
             nn.GELU(),
         )
 
-        self.position_head = nn.Linear(
-            h_feat_dec,
-            num_output_channels,
-        )
-
-        self.direction_head = nn.Linear(
-            h_feat_dec,
-            3,
-        )
-# ## sep heads with dir 
-        # self.position_heads = nn.ModuleList([nn.Linear(
+        # self.position_head = nn.Linear(
         #     h_feat_dec,
         #     num_output_channels,
-        # ) for _ in range(num_slots)]) 
+        # )
 
-        # self.direction_heads = nn.ModuleList([nn.Linear(
+        # self.direction_head = nn.Linear(
         #     h_feat_dec,
         #     3,
-        # ) for _ in range(num_slots)])
+        # )
+# ## sep heads with dir 
+        self.position_heads = nn.ModuleList([nn.Linear(
+            h_feat_dec,
+            num_output_channels,
+        ) for _ in range(num_slots)]) 
+
+        self.direction_heads = nn.ModuleList([nn.Linear(
+            h_feat_dec,
+            3,
+        ) for _ in range(num_slots)])
 
 
 
@@ -720,42 +720,12 @@ class CrossAttnDecoder(nn.Module):
 
 # direction loss run
 
-        features = self.output_features(decoded)
-
-        positions = self.position_head(features)
-
-        directions = F.normalize(
-            self.direction_head(features),
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
-
-        return torch.cat(
-            [positions, directions],
-            dim=-1,
-        )
-
         # features = self.output_features(decoded)
 
-        # positions = torch.stack(
-        #     [
-        #         self.position_heads[i](features[..., i, :])
-        #         for i in range(self.num_slots)
-        #     ],
-        #     dim=-2,
-        # )
-
-        # dirs = torch.stack(
-        #     [
-        #         self.direction_heads[i](features[..., i, :])
-        #         for i in range(self.num_slots)
-        #     ],
-        #     dim=-2,
-        # )
+        # positions = self.position_head(features)
 
         # directions = F.normalize(
-        #     dirs,
+        #     self.direction_head(features),
         #     p=2,
         #     dim=-1,
         #     eps=1e-8,
@@ -765,6 +735,36 @@ class CrossAttnDecoder(nn.Module):
         #     [positions, directions],
         #     dim=-1,
         # )
+
+        features = self.output_features(decoded)
+
+        positions = torch.stack(
+            [
+                self.position_heads[i](features[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
+
+        dirs = torch.stack(
+            [
+                self.direction_heads[i](features[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
+
+        directions = F.normalize(
+            dirs,
+            p=2,
+            dim=-1,
+            eps=1e-8,
+        )
+
+        return torch.cat(
+            [positions, directions],
+            dim=-1,
+        )
 
 
 
