@@ -122,6 +122,10 @@ def main_worker_function(rank, config, hydra_config=None):
             if 'loss' in task_config:
                 engine.configure_loss(task_config.pop("loss"))
 
+    # to resume training
+    if config.get("resume_from") is not None:
+        engine.restore_state(to_absolute_path(config.resume_from))
+    
     # Perform tasks
     for task, task_config in config.tasks.items():
         if is_distributed:
