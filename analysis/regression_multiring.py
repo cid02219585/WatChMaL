@@ -308,8 +308,8 @@ def tabulate_statistics(runs, quantities, stat_labels, statistic="resolution", s
         stat_labels = [stat_labels]
     run_labels = [r.run_label for r in runs]
     statistic_map = {
-        "resolution": lambda x:  np.quantile(np.abs(x), 0.68),
-        "mean": lambda x: np.mean(x),
+        "resolution": lambda x:  np.nanquantile(np.abs(x), 0.68),
+        "mean": lambda x: np.nanmean(x),
     }
     if isinstance(statistic, str):
         functions = [statistic_map[statistic]]*len(quantities)
