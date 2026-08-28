@@ -92,7 +92,62 @@ class Bottleneck(nn.Module):
 
         return out
 
+class PositionEmbeddingSine2D(nn.Module):
+    def __init__(self, d_model, temperature=10000):
+        super().__init__()
 
+        assert d_model % 4 == 0
+        self.d_model = d_model
+        self.temperature = temperature
+
+    def forward(self, x):
+        # x: [B, C, H, W]
+
+        B, C, H, W = x.shape
+        device = x.device
+
+        y = torch.arange(H, device=device, dtype=torch.float32)
+        x_pos = torch.arange(W, device=device, dtype=torch.float32)
+
+        y = y / max(H - 1, 1)
+        x_pos = x_pos / max(W - 1, 1)
+
+        dim = torch.arange(
+            C // 4,
+            device=device,
+            dtype=torch.float32
+        )
+
+        dim = self.temperature ** (
+            2 * torch.floor(dim / 2) / (C // 2)
+        )
+
+        pos_y = y[:, None] / dim[None, :]
+        pos_x = x_pos[:, None] / dim[None, :]
+
+        pos_y = torch.cat(
+            [pos_y.sin(), pos_y.cos()],
+            dim=1
+        )
+
+        pos_x = torch.cat(
+            [pos_x.sin(), pos_x.cos()],
+            dim=1
+        )
+
+        pos_y = pos_y[:, :C // 2]
+        pos_x = pos_x[:, :C // 2]
+
+        pos = torch.cat([
+            pos_y[:, None, :].expand(H, W, -1),
+            pos_x[None, :, :].expand(H, W, -1)
+        ], dim=-1)
+
+        # [H, W, C] -> [1, HW, C]
+        pos = pos.reshape(1, H * W, C)
+
+        return pos.expand(B, -1, -1)
+    
 class ResNet_encoder(nn.Module):
 
     def __init__(self, block, layers, num_input_channels, zero_init_residual=False,
@@ -254,6 +309,7 @@ class TransformerDecoder(nn.Module):
         # tgt_key_padding_mask: torch.Tensor | None = None,
         memory_key_padding_mask: torch.Tensor | None = None,
         query_pos: torch.Tensor | None = None,
+        # memory_pos=None,
         # tgt_is_causal: bool | None = None,
         # memory_is_causal: bool = False,
         return_intermediate=False,
@@ -274,6 +330,7 @@ class TransformerDecoder(nn.Module):
                 # tgt_key_padding_mask=tgt_key_padding_mask,
                 memory_key_padding_mask=memory_key_padding_mask,
                 query_pos=query_pos,
+                # memory_pos=memory_pos,
                 # tgt_is_causal=tgt_is_causal,
                 # memory_is_causal=memory_is_causal,
             )
@@ -370,6 +427,7 @@ class TransformerDecoderLayer(nn.Module):
         tgt_is_causal: bool = False,
         memory_is_causal: bool = False,
         query_pos: torch.Tensor | None = None,
+        # memory_pos=None,
     ) -> torch.Tensor:
 
         x = tgt
@@ -384,6 +442,7 @@ class TransformerDecoderLayer(nn.Module):
                     memory_mask,
                     memory_key_padding_mask,
                     memory_is_causal,
+                    # memory_pos=memory_pos
                 )
 
                 # print('error')
@@ -405,6 +464,7 @@ class TransformerDecoderLayer(nn.Module):
                     memory_key_padding_mask,
                     memory_is_causal,
                     query_pos=query_pos,
+                    # memory_pos=memory_pos
                 )
                 # x = x + self._mha_block(
                 #     self.norm2(x),
@@ -468,6 +528,7 @@ class TransformerDecoderLayer(nn.Module):
         key_padding_mask: torch.Tensor | None,
         is_causal: bool = False,
         query_pos: torch.Tensor | None = None,
+        # memory_pos=None,
     ) -> torch.Tensor:
         if query_pos is not None:
             x = self._with_pos_embed(x, query_pos)
@@ -483,8 +544,28 @@ class TransformerDecoderLayer(nn.Module):
             need_weights=False,
         )[0]
         return self.dropout2(x)
+            # slot identity on queries
+        # q = self._with_pos_embed(x, query_pos)
 
-### Competitive slot attention
+        # # spatial position on ResNet memory keys
+        # k = self._with_pos_embed(mem, memory_pos)
+
+        # # values remain the actual ResNet features
+        # v = mem
+
+        # x = self.multihead_attn(
+        #     q,
+        #     k,
+        #     v,
+        #     attn_mask=attn_mask,
+        #     key_padding_mask=key_padding_mask,
+        #     is_causal=is_causal,
+        #     need_weights=False,
+        # )[0]
+
+        # return self.dropout2(x)
+
+## Competitive slot attention
     # def _mha_block(
     #     self,
     #     x: torch.Tensor,                  # [B, S, D]
@@ -642,32 +723,32 @@ class CrossAttnDecoder(nn.Module):
         )
 
         # Shared head across slots
-        self.head = nn.Sequential(
-            nn.LayerNorm(h_feat_dec),
-            nn.Linear(h_feat_dec, h_feat_dec),
-            nn.GELU(),
-            nn.Linear(h_feat_dec, num_output_channels),
-        )
+        # self.head = nn.Sequential(
+        #     nn.LayerNorm(h_feat_dec),
+        #     nn.Linear(h_feat_dec, h_feat_dec),
+        #     nn.GELU(),
+        #     nn.Linear(h_feat_dec, num_output_channels),
+        # )
 
 # sep heads
-        # self.heads = nn.ModuleList([
-        #     nn.Sequential(
-        #         nn.LayerNorm(h_feat_dec),
-        #         nn.Linear(h_feat_dec, h_feat_dec),
-        #         nn.GELU(),
-        #         nn.Linear(h_feat_dec, num_output_channels),
-        #     )
-        #     for _ in range(num_slots)
-        # ])
+        self.heads = nn.ModuleList([
+            nn.Sequential(
+                nn.LayerNorm(h_feat_dec),
+                nn.Linear(h_feat_dec, h_feat_dec),
+                nn.GELU(),
+                nn.Linear(h_feat_dec, num_output_channels),
+            )
+            for _ in range(num_slots)
+        ])
 
 
 
 ## dir loss
-        self.output_features = nn.Sequential(
-            nn.LayerNorm(h_feat_dec),
-            nn.Linear(h_feat_dec, h_feat_dec),
-            nn.GELU(),
-        )
+        # self.output_features = nn.Sequential(
+        #     nn.LayerNorm(h_feat_dec),
+        #     nn.Linear(h_feat_dec, h_feat_dec),
+        #     nn.GELU(),
+        # )
 
         # self.position_head = nn.Linear(
         #     h_feat_dec,
@@ -679,20 +760,17 @@ class CrossAttnDecoder(nn.Module):
         #     3,
         # )
 # ## sep heads with dir 
-        self.position_heads = nn.ModuleList([nn.Linear(
-            h_feat_dec,
-            num_output_channels,
-        ) for _ in range(num_slots)]) 
+        # self.position_heads = nn.ModuleList([nn.Linear(
+        #     h_feat_dec,
+        #     num_output_channels,
+        # ) for _ in range(num_slots)]) 
 
-        self.direction_heads = nn.ModuleList([nn.Linear(
-            h_feat_dec,
-            3,
-        ) for _ in range(num_slots)])
+        # self.direction_heads = nn.ModuleList([nn.Linear(
+        #     h_feat_dec,
+        #     3,
+        # ) for _ in range(num_slots)])
 
-
-
-
-    def forward(self, x_dense, mask=None):
+    def forward(self, x_dense, mask=None): #, memory_pos=None):
         batch_size = x_dense.size(0)
         queries = self.slot_queries.unsqueeze(0).expand(batch_size, -1, -1)
 
@@ -706,17 +784,18 @@ class CrossAttnDecoder(nn.Module):
             memory=x_dense,
             memory_key_padding_mask=mask,
             query_pos=query_pos,
+            # memory_pos=memory_pos,
             return_intermediate=self.aux_loss and self.training,
         )
         # return self.head(decoded)
 
-        # return torch.stack(
-        #     [
-        #         self.heads[i](decoded[..., i, :])
-        #         for i in range(self.num_slots)
-        #     ],
-        #     dim=-2,
-        # )
+        return torch.stack(
+            [
+                self.heads[i](decoded[..., i, :])
+                for i in range(self.num_slots)
+            ],
+            dim=-2,
+        )
 
 # direction loss run
 
@@ -736,35 +815,35 @@ class CrossAttnDecoder(nn.Module):
         #     dim=-1,
         # )
 
-        features = self.output_features(decoded)
+        # features = self.output_features(decoded)
 
-        positions = torch.stack(
-            [
-                self.position_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # positions = torch.stack(
+        #     [
+        #         self.position_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
-        dirs = torch.stack(
-            [
-                self.direction_heads[i](features[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # dirs = torch.stack(
+        #     [
+        #         self.direction_heads[i](features[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
-        directions = F.normalize(
-            dirs,
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
+        # directions = F.normalize(
+        #     dirs,
+        #     p=2,
+        #     dim=-1,
+        #     eps=1e-8,
+        # )
 
-        return torch.cat(
-            [positions, directions],
-            dim=-1,
-        )
+        # return torch.cat(
+        #     [positions, directions],
+        #     dim=-1,
+        # )
 
 
 
@@ -785,7 +864,6 @@ class EncoderDecoder(nn.Module):
         # x_dense = self.memory_norm(x_dense)
         return self.decoder(x_dense)
     
-
 # class EncoderDecoder(nn.Module):
 #     def __init__(
 #         self,
@@ -798,55 +876,27 @@ class EncoderDecoder(nn.Module):
 
 #         self.encoder = encoder
 #         self.decoder = decoder
-#         self.h_feat_dec = h_feat_dec
 
 #         self.input_proj = nn.Conv2d(
 #             enc_channels,
 #             h_feat_dec,
-#             kernel_size=1,
+#             kernel_size=1
 #         )
 
-#         self.row_embed = None
-#         self.col_embed = None
+#         self.position_embedding = PositionEmbeddingSine2D(
+#             h_feat_dec
+#         )
 
 #     def forward(self, data):
+
 #         feat = self.encoder(data)
 #         feat = self.input_proj(feat)
 
-#         B, C, H, W = feat.shape
-
-#         # Initialise once, using the actual ResNet output shape
-#         if self.row_embed is None:
-#             self.row_embed = nn.Embedding(
-#                 H,
-#                 self.h_feat_dec // 2,
-#             ).to(feat.device)
-
-#             self.col_embed = nn.Embedding(
-#                 W // 2,
-#                 self.h_feat_dec // 2,
-#             ).to(feat.device)
-
-#         rows = self.row_embed(
-#             torch.arange(H, device=feat.device)
-#         )
-
-#         cols = self.col_embed(
-#             torch.arange(W, device=feat.device) % (W // 2)
-#         )
-
-#         pos = torch.cat(
-#             [
-#                 cols.unsqueeze(0).expand(H, -1, -1),
-#                 rows.unsqueeze(1).expand(-1, W, -1),
-#             ],
-#             dim=-1,
-#         )
-
-#         pos = pos.permute(2, 0, 1).unsqueeze(0)
-
-#         feat = feat + pos
+#         pos = self.position_embedding(feat)
 
 #         x_dense = feat.flatten(2).transpose(1, 2)
 
-#         return self.decoder(x_dense)
+#         return self.decoder(
+#             x_dense,
+#             memory_pos=pos,
+#         )
