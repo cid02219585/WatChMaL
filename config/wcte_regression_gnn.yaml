@@ -13,3 +13,5 @@ engine:
     directions: 0.01
 model:
   num_output_channels: 6
+
+resume_from: null

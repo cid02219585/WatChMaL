@@ -1,6 +1,6 @@
 defaults:
-    - wcte_defaults_multiring
-    - engine: regression_multiring
+    - wcte_defaults_gnn_variable_multi
+    - engine: regression_variable_multi
     - override loss@tasks.train.loss: huber
     - override loss@tasks.evaluate.loss: huber
     - _self_

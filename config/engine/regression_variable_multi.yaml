@@ -1,0 +1,4 @@
+_target_: watchmal.engine.regression_detr.DETRRegressionEngine
+target_key: 'positions'
+clip_grad_norm: null
+classification_weight: 1.0

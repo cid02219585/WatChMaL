@@ -1,0 +1,22 @@
+_target_: watchmal.model.gnn_detr.EncoderDecoder
+
+encoder:
+  _target_: watchmal.model.gnn_detr.NonHierGATEncoder
+  pmt_in: 8
+  mpmt_in: 6
+  virtual_in: 4
+  h_feat: 64 
+  num_layers: 5
+  dropout: 0.0
+  aggr: 'sum'
+
+decoder:
+  _target_: watchmal.model.gnn_detr.DETRCrossAttnDecoder
+  h_feat_dec: 128
+  num_slots: 2
+  num_layers: 3
+  aux_loss: True
+  reinject: True
+  direction_loss: True
+  separate_heads: False
+  slot_competition: False

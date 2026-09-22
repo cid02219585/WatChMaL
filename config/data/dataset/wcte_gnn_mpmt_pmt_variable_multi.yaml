@@ -1,0 +1,6 @@
+_target_: watchmal.dataset.gnn.gnn_mpmt_single_multi.GNNMultiPMTDataset
+single_h5file: /vols/hyperk/users/ks2922/ML_2025/simulation/WCTE_April2026/WCTE_1.5.2_April2026_0-1GeV_12M_e-_12M_mu-_medianT/WCTE_1.5.2_April2026_0-1GeV_12M_e-_12M_mu-_medianT.h5
+multi_h5file: /vols/hyperk/users/sc4422/first_run/multiring_data/wcte_2e-_indep_vert_indep_energy_12M.h5
+geometry_file: /vols/hyperk/WCTE/ML_2025/cds_geometry/geometries/WCTE_geometry_v1.12.21.npz
+use_orientations: False
+k_neighbors: 10
