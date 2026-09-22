@@ -1,3 +1,7 @@
+### Encoder-decoder architecture to handle fixed two-ring events, with ResNet50 as the encoder - architectures from the single ring code (but producing hidden embeddings instead of output predictions)
+# Transformer decoder uses PyTorch implementation as baseline, then modifications (e.g. slot competition, auxiliary losses) were tested on top of this 
+# /vols/hyperk/users/sc4422/first_run/scripts/gnn/multiring (sorry about the mislabelling)
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -233,13 +237,6 @@ def resnet18_encoder(**kwargs):
 
 def resnet34_encoder(**kwargs):
     return ResNet_encoder(BasicBlock, [3, 4, 6, 3], **kwargs)
-
-
-
-
-## implemented  from pytorch
-# 
-# so i can edit details
 
 
 # def _get_seq_len(src: torch.Tensor, batch_first: bool) -> int | None:
@@ -723,23 +720,23 @@ class CrossAttnDecoder(nn.Module):
         )
 
         # Shared head across slots
-        # self.head = nn.Sequential(
-        #     nn.LayerNorm(h_feat_dec),
-        #     nn.Linear(h_feat_dec, h_feat_dec),
-        #     nn.GELU(),
-        #     nn.Linear(h_feat_dec, num_output_channels),
-        # )
+        self.head = nn.Sequential(
+            nn.LayerNorm(h_feat_dec),
+            nn.Linear(h_feat_dec, h_feat_dec),
+            nn.GELU(),
+            nn.Linear(h_feat_dec, num_output_channels),
+        )
 
 # sep heads
-        self.heads = nn.ModuleList([
-            nn.Sequential(
-                nn.LayerNorm(h_feat_dec),
-                nn.Linear(h_feat_dec, h_feat_dec),
-                nn.GELU(),
-                nn.Linear(h_feat_dec, num_output_channels),
-            )
-            for _ in range(num_slots)
-        ])
+        # self.heads = nn.ModuleList([
+        #     nn.Sequential(
+        #         nn.LayerNorm(h_feat_dec),
+        #         nn.Linear(h_feat_dec, h_feat_dec),
+        #         nn.GELU(),
+        #         nn.Linear(h_feat_dec, num_output_channels),
+        #     )
+        #     for _ in range(num_slots)
+        # ])
 
 
 
@@ -787,15 +784,15 @@ class CrossAttnDecoder(nn.Module):
             # memory_pos=memory_pos,
             return_intermediate=self.aux_loss and self.training,
         )
-        # return self.head(decoded)
+        return self.head(decoded)
 
-        return torch.stack(
-            [
-                self.heads[i](decoded[..., i, :])
-                for i in range(self.num_slots)
-            ],
-            dim=-2,
-        )
+        # return torch.stack(
+        #     [
+        #         self.heads[i](decoded[..., i, :])
+        #         for i in range(self.num_slots)
+        #     ],
+        #     dim=-2,
+        # )
 
 # direction loss run
 

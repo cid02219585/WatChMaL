@@ -1,3 +1,9 @@
+### Encoder-decoder architecture to handle fixed two-ring events, with NonHierGAT, HierTrans as the encoders - architectures from the single ring code (but producing hidden embeddings instead of output predictions)
+# Transformer decoder uses PyTorch implementation as baseline, then modifications (e.g. slot competition, auxiliary direction loss) were tested on top of this 
+# The ablations of slot embedding reinjection and auxiliary layer losses are implemented as flags, with current submission defaulting both to be true (as both were beneficial across all models)
+# The ablations of slot competition, direction loss, and separate heads (and there respective combinations) are commented out blocks of code (e.g. slot competition is a new _mha_block, so to use it the other _mha_block has to be commented out)
+# submission scripts are in /vols/hyperk/users/sc4422/first_run/scripts/gnn/multiring
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -331,13 +337,6 @@ class Decoder(nn.Module):
 
 
 
-
-
-
-
-## implemented  from pytorch
-# 
-# so i can edit details
 
 
 # def _get_seq_len(src: torch.Tensor, batch_first: bool) -> int | None:

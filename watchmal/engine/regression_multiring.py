@@ -1,3 +1,8 @@
+### Regression engine for two ring
+# Only applicable for two ring events - simplified matching algorithm + no classification in matching cost because of fixed number of rings
+# The ablations of auxiliary layer losses and auxiliary direction losses for the compute_metrics function are commented out blocks underneath comments labelling them (all models benefitted from auxiliary layer losses)
+# The direction loss is a scaled cos loss (angle only, no magnitude) not huber 
+
 import torch
 import torch.nn.functional as F
 
@@ -169,284 +174,9 @@ class RegressionEngine(ReconstructionEngine):
         
         return self.target_dict | self.predictions
 
-    # def compute_metrics(self):
-    #     self.loss = self.criterion(self.model_out, self.stacked_target)
-    #     # return loss and metrics for the predictions
-    #     # metrics = {k: m for t, v in self.target_dict.items() if t in metric_functions
-    #     #            for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items()}
-    #     metrics = {}
-
-    #     for t, v in self.target_dict.items():
-    #         if t not in metric_functions:
-    #             continue
-    #         else:
-    #             for k, m in metric_functions[t](self.predictions["predicted_"+t], v).items():
-    #                 for i in range(v.shape[1]):
-    #                     metrics[k+f'slot{i}'] = m[i].reshape(())
-
-    #     metrics['loss'] = self.loss
-
-    #     return metrics
-
-    # def compute_metrics(self):
-    #     B = self.model_out.shape[0]
-    #     w_pos = 1.0 / 100.0**2 
-    #     w_dir = 1.0
-    #     w_energy = 1.0
-
-    #     pred_dict = {
-    #         t: self.predictions["predicted_" + t]
-    #         for t in self.target_key
-    #     }  # (B, 2, d_t)
-    #     true_dict = self.target_dict  # (B, 2, d_t)
-
-    #     def per_ring_loss(pred_d, true_d):
-    #         # Position: (B, 2)
-    #         pos_loss = ((pred_d["positions"] - true_d["positions"]) ** 2).mean(dim=-1)
-
-    #         # Direction: (B, 2)
-    #         pred_dir = pred_d["directions"]
-    #         true_dir = true_d["directions"]
-    #         pred_dir_n = pred_dir / (
-    #             torch.linalg.vector_norm(pred_dir, dim=-1, keepdim=True) + 1e-8
-    #         )
-    #         true_dir_n = true_dir / (
-    #             torch.linalg.vector_norm(true_dir, dim=-1, keepdim=True) + 1e-8
-    #         )
-    #         dir_loss = 1.0 - torch.sum(pred_dir_n * true_dir_n, dim=-1)
-
-    #         # Energy: (B, 2)
-    #         pred_e = torch.clamp(pred_d["energies"].squeeze(-1), min=1e-3)
-    #         true_e = torch.clamp(true_d["energies"].squeeze(-1), min=1e-3)
-    #         energy_loss = (torch.log(pred_e) - torch.log(true_e)) ** 2
-
-    #         total_loss = (
-    #             w_pos * pos_loss
-    #             + w_dir * dir_loss
-    #             + w_energy * energy_loss
-    #         )
-    #         components = {
-    #             "pos_loss": pos_loss,
-    #             "dir_loss": dir_loss,
-    #             "energy_loss": energy_loss,
-    #         }
-    #         return total_loss, components
-
-    #     straight_loss, straight_components = per_ring_loss(pred_dict, true_dict)
-
-    #     true_dict_swapped = {
-    #         t: v.flip(dims=[1])
-    #         for t, v in true_dict.items()
-    #     }
-    #     swapped_loss, swapped_components = per_ring_loss(pred_dict, true_dict_swapped)
-
-    #     straight_total = straight_loss.sum(dim=-1)  # (B,)
-    #     swapped_total = swapped_loss.sum(dim=-1)    # (B,)
-
-    #     # Warm-up: matching against untrained predictions is unstable (target flips
-    #     # almost every batch when pred is close to random). Use fixed ("straight")
-    #     # assignment for the first warmup_iterations, then switch to real matching.
-    #     if self.iteration < self.warmup_iterations:
-    #         use_swapped = torch.zeros(B, dtype=torch.bool, device=self.device)
-    #     else:
-    #         use_swapped = swapped_total < straight_total
-
-    #     matched_total = torch.where(use_swapped, swapped_total, straight_total)
-    #     self.loss = matched_total.mean()
-
-    #     metrics = {}
-    #     metrics["loss"] = self.loss
-    #     metrics["straight_loss"] = straight_total.mean()
-    #     metrics["swapped_loss"] = swapped_total.mean()
-    #     metrics["swap_fraction"] = use_swapped.float().mean()
-
-    #     # Component losses for scale debugging
-    #     metrics["straight_pos_loss"] = straight_components["pos_loss"].mean()
-    #     metrics["straight_dir_loss"] = straight_components["dir_loss"].mean()
-    #     metrics["straight_energy_loss"] = straight_components["energy_loss"].mean()
-
-    #     # Matched targets for normal metric functions
-    #     use_swapped_m = use_swapped.detach().view(B, 1, 1)
-    #     for t, v in self.target_dict.items():
-    #         if t not in metric_functions:
-    #             continue
-    #         pred_t = self.predictions["predicted_" + t]
-    #         v_swapped = v.flip(dims=[1])
-    #         matched_v = torch.where(use_swapped_m, v_swapped, v)
-    #         for i in range(matched_v.shape[1]):
-    #             pred_i = pred_t[:, i]
-    #             true_i = matched_v[:, i]
-    #             for k, m in metric_functions[t](pred_i, true_i).items():
-    #                 metrics[f"{k}_slot{i}"] = m.reshape(())
-
-    #     return metrics
-
-    # def compute_metrics(self):
-    #     B = self.model_out.shape[0]
-    #     w_pos = 1.0 / 100.0**2
-    #     w_dir = 1.0
-    #     w_energy = 1.0
-
-    #     pred_dict = {t: self.predictions["predicted_" + t] for t in self.target_key}
-    #     true_dict = self.target_dict  # each (B, num_slots, d_t)
-
-    #     def per_ring_loss(pred_d, true_d):
-    #         pos_loss = ((pred_d["positions"] - true_d["positions"]) ** 2).mean(dim=-1)
-
-    #         pred_dir = pred_d["directions"]
-    #         true_dir = true_d["directions"]
-    #         pred_dir_n = pred_dir / (torch.linalg.vector_norm(pred_dir, dim=-1, keepdim=True) + 1e-8)
-    #         true_dir_n = true_dir / (torch.linalg.vector_norm(true_dir, dim=-1, keepdim=True) + 1e-8)
-    #         dir_loss = 1.0 - torch.sum(pred_dir_n * true_dir_n, dim=-1)
-
-    #         pred_e = torch.clamp(pred_d["energies"].squeeze(-1), min=1e-3)
-    #         true_e = torch.clamp(true_d["energies"].squeeze(-1), min=1e-3)
-    #         energy_loss = (torch.log(pred_e) - torch.log(true_e)) ** 2
-
-    #         total = w_pos * pos_loss + w_dir * dir_loss + w_energy * energy_loss
-    #         components = {"pos_loss": pos_loss, "dir_loss": dir_loss, "energy_loss": energy_loss}
-    #         return total, components
-
-    #     straight_loss, straight_components = per_ring_loss(pred_dict, true_dict)
-
-    #     true_dict_swapped = {t: v.flip(dims=[1]) for t, v in true_dict.items()}
-    #     swapped_loss, _ = per_ring_loss(pred_dict, true_dict_swapped)
-
-    #     straight_total = straight_loss.sum(dim=-1)  # (B,)
-    #     swapped_total = swapped_loss.sum(dim=-1)    # (B,)
-
-    #     # Warm-up: matching against near-random predictions is unstable, so use
-    #     # fixed ("straight") assignment for the first warmup_iterations.
-    #     if self.iteration < self.warmup_iterations:
-    #         use_swapped = torch.zeros(B, dtype=torch.bool, device=self.device)
-    #     else:
-    #         use_swapped = swapped_total < straight_total
-
-    #     matched_total = torch.where(use_swapped, swapped_total, straight_total)
-    #     self.loss = matched_total.mean()
-
-    #     metrics = {
-    #         "loss": self.loss,
-    #         "straight_loss": straight_total.mean(),
-    #         "swapped_loss": swapped_total.mean(),
-    #         "swap_fraction": use_swapped.float().mean(),
-    #         "straight_pos_loss": straight_components["pos_loss"].mean(),
-    #         "straight_dir_loss": straight_components["dir_loss"].mean(),
-    #         "straight_energy_loss": straight_components["energy_loss"].mean(),
-    #     }
-
-    #     # Build matched targets (using the clean torch.where pattern) for per-target metrics
-    #     use_swapped_view = use_swapped.detach().view(B, 1, 1)
-    #     for t, v in true_dict.items():
-    #         matched_v = torch.where(use_swapped_view, v.flip(dims=[1]), v)
-    #         pred_t = pred_dict[t]
-
-    #         if t == "positions":
-    #             position_error = torch.linalg.vector_norm(pred_t - matched_v, dim=-1)
-    #             metrics["position_error_slot0"] = position_error[:, 0].mean()
-    #             metrics["position_error_slot1"] = position_error[:, 1].mean()
-    #             metrics["mean_position_error"] = position_error.mean()
-    #         elif t in metric_functions:
-    #             for i in range(matched_v.shape[1]):
-    #                 for k, m in metric_functions[t](pred_t[:, i], matched_v[:, i]).items():
-    #                     metrics[f"{k}_slot{i}"] = m.reshape(())
-
-    #     metrics["predicted_slot_separation"] = torch.linalg.vector_norm(
-    #         pred_dict["positions"][:, 0] - pred_dict["positions"][:, 1], dim=-1
-    #     ).mean()
-    #     metrics["true_slot_separation"] = torch.linalg.vector_norm(
-    #         true_dict["positions"][:, 0] - true_dict["positions"][:, 1], dim=-1
-    #     ).mean()
-
-    #     return metrics
-        
-    # def compute_metrics(self):
-    #     pred_positions = self.predictions["predicted_positions"]
-    #     true_positions = self.target_dict["positions"]
-
-    #     # Fixed energy-derived ordering; no matching during this diagnostic.
-    #     per_slot_loss = (
-    #         (pred_positions - true_positions) ** 2
-    #     ).mean(dim=-1)
-
-    #     self.loss = per_slot_loss.sum(dim=-1).mean()
-
-    #     position_error = torch.linalg.vector_norm(
-    #         pred_positions - true_positions,
-    #         dim=-1,
-    #     )
-
-    #     metrics = {
-    #         "loss": self.loss,
-    #         "position_error_slot0": position_error[:, 0].mean(),
-    #         "position_error_slot1": position_error[:, 1].mean(),
-    #         "mean_position_error": position_error.mean(),
-    #         "predicted_slot_separation": torch.linalg.vector_norm(
-    #             pred_positions[:, 0] - pred_positions[:, 1],
-    #             dim=-1,
-    #         ).mean(),
-    #         "true_slot_separation": torch.linalg.vector_norm(
-    #             true_positions[:, 0] - true_positions[:, 1],
-    #             dim=-1,
-    #         ).mean(),
-    #     }
-
-    #     return metrics
 
 
-
-    ## ok for two slots
-    # def compute_metrics(self):
-    #     true_positions = self.target_dict["positions"]
-    #     pred_positions = self.predictions["predicted_positions"]
-
-    #     pred_scaled = self.model_out
-    #     true_scaled = self.stacked_target
-
-    #     cost = (
-    #         pred_scaled.unsqueeze(2)
-    #         - true_scaled.unsqueeze(1)
-    #     ).square().mean(dim=-1)
-
-    #     identity_cost = cost[:, 0, 0] + cost[:, 1, 1]
-    #     swap_cost = cost[:, 0, 1] + cost[:, 1, 0]
-
-    #     use_swap = swap_cost < identity_cost
-
-    #     self.loss = torch.where(
-    #         use_swap,
-    #         swap_cost,
-    #         identity_cost,
-    #     ).mean()
-
-    #     # Match targets in physical units for reporting metrics.
-    #     matched_true = true_positions.clone()
-    #     matched_true[use_swap] = true_positions[use_swap].flip(dims=[1])
-
-    #     position_error = torch.linalg.vector_norm(
-    #         pred_positions - matched_true,
-    #         dim=-1,
-    #     )
-
-    #     metrics = {
-    #         "loss": self.loss,
-    #         "position_error_slot0": position_error[:, 0].mean(),
-    #         "position_error_slot1": position_error[:, 1].mean(),
-    #         "mean_position_error": position_error.mean(),
-    #         "swap_fraction": use_swap.float().mean(),
-    #         "predicted_slot_separation": torch.linalg.vector_norm(
-    #             pred_positions[:, 0] - pred_positions[:, 1],
-    #             dim=-1,
-    #         ).mean(),
-    #         "true_slot_separation": torch.linalg.vector_norm(
-    #             true_positions[:, 0] - true_positions[:, 1],
-    #             dim=-1,
-    #         ).mean(),
-    #     }
-
-    #     return metrics
-
-### huber
+# # ### huber loss
     # def compute_metrics(self):
     #     pred_scaled = self.model_out
     #     true_scaled = self.stacked_target
@@ -531,204 +261,205 @@ class RegressionEngine(ReconstructionEngine):
     #     }
 
 
-## aux loss
+## auxiliary layer loss
 
-    # def compute_metrics(self):
-    #     true_scaled = self.stacked_target
-
-    #     if self.model_out.dim() == true_scaled.dim() + 1:
-    #         per_layer_preds = list(self.model_out)        # L tensors of (B, S, C)
-    #     else:
-    #         per_layer_preds = [self.model_out]
-
-    #     layer_losses = []
-    #     for pred_scaled in per_layer_preds:
-    #         pairwise_cost = F.huber_loss(
-    #             pred_scaled.unsqueeze(2),
-    #             true_scaled.unsqueeze(1),
-    #             delta=self.criterion.delta,
-    #             reduction="none",
-    #         ).mean(dim=-1)
-
-    #         identity_cost = pairwise_cost[:, 0, 0] + pairwise_cost[:, 1, 1]
-    #         swap_cost     = pairwise_cost[:, 0, 1] + pairwise_cost[:, 1, 0]
-
-    #         use_swap = swap_cost < identity_cost
-
-    #         layer_losses.append(
-    #             torch.where(use_swap, swap_cost, identity_cost).mean()
-    #         )
-
-    #     self.loss = torch.stack(layer_losses).mean()
-
-    #     # final_loss = layer_losses[-1]
-
-    #     # if len(layer_losses) > 1:
-    #     #     auxiliary_loss = torch.stack(layer_losses[:-1]).mean()
-    #     # else:
-    #     #     auxiliary_loss = final_loss.new_zeros(())
-
-    #     # aux_weight = 0.2
-
-    #     # self.loss = final_loss + aux_weight * auxiliary_loss
-
-    #     pred_positions = self.predictions["predicted_positions"]
-    #     true_positions = self.target_dict["positions"]
-
-    #     matched_true = torch.where(
-    #         use_swap[:, None, None],
-    #         true_positions.flip(dims=[1]),
-    #         true_positions,
-    #     )
-
-    #     position_error = torch.linalg.vector_norm(
-    #         pred_positions - matched_true, dim=-1,
-    #     )
-
-    #     return {
-    #         "loss": self.loss,
-    #         "position_error_slot0": position_error[:, 0].mean(),
-    #         "position_error_slot1": position_error[:, 1].mean(),
-    #         "mean_position_error": position_error.mean(),
-    #         "swap_fraction": use_swap.float().mean(),
-    #         "predicted_slot_separation": torch.linalg.vector_norm(
-    #             pred_positions[:, 0] - pred_positions[:, 1], dim=-1,
-    #         ).mean(),
-    #         "true_slot_separation": torch.linalg.vector_norm(
-    #             true_positions[:, 0] - true_positions[:, 1], dim=-1,
-    #         ).mean(),
-    #     }
-
-
-# ## dir 
     def compute_metrics(self):
-        # Truth targets
-        true_positions_scaled = (
-            self.target_dict["positions"] - self.offset["positions"]
-        ) / self.scale["positions"]
+        true_scaled = self.stacked_target
 
-        true_directions = F.normalize(
-            self.target_dict["directions"],
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
-
-        # Training with aux decoder outputs:
-        # [L, B, S, 6]
-        # Evaluation:
-        # [B, S, 6]
-        if self.model_out.dim() == self.stacked_target.dim() + 1:
-            per_layer_outputs = list(self.model_out)
+        if self.model_out.dim() == true_scaled.dim() + 1:
+            per_layer_preds = list(self.model_out)        # L tensors of (B, S, C)
         else:
-            per_layer_outputs = [self.model_out]
+            per_layer_preds = [self.model_out]
 
         layer_losses = []
-
-        final_use_swap = None
-        final_position_loss = None
-        final_direction_loss = None
-
-        direction_weight = 0.05
-
-        for layer_output in per_layer_outputs:
-            pred_positions_scaled = layer_output[..., :3]
-
-            pred_directions = F.normalize(
-                layer_output[..., 3:6],
-                p=2,
-                dim=-1,
-                eps=1e-8,
-            )
-
-            # Pairwise position cost:
-            # [B, predicted slot, truth slot]
-            pairwise_position_cost = F.huber_loss(
-                pred_positions_scaled.unsqueeze(2),
-                true_positions_scaled.unsqueeze(1),
+        for pred_scaled in per_layer_preds:
+            pairwise_cost = F.huber_loss(
+                pred_scaled.unsqueeze(2),
+                true_scaled.unsqueeze(1),
                 delta=self.criterion.delta,
                 reduction="none",
             ).mean(dim=-1)
 
-            identity_cost = (
-                pairwise_position_cost[:, 0, 0]
-                + pairwise_position_cost[:, 1, 1]
-            )
-
-            swap_cost = (
-                pairwise_position_cost[:, 0, 1]
-                + pairwise_position_cost[:, 1, 0]
-            )
+            identity_cost = pairwise_cost[:, 0, 0] + pairwise_cost[:, 1, 1]
+            swap_cost     = pairwise_cost[:, 0, 1] + pairwise_cost[:, 1, 0]
 
             use_swap = swap_cost < identity_cost
 
-            position_loss = torch.where(
-                use_swap,
-                swap_cost,
-                identity_cost,
-            ).mean()
-
-            # Use the position-derived assignment for directions
-            matched_true_directions = torch.where(
-                use_swap[:, None, None],
-                true_directions.flip(dims=[1]),
-                true_directions,
-            )
-
-            direction_loss = (
-                1.0
-                - torch.sum(
-                    pred_directions * matched_true_directions,
-                    dim=-1,
-                )
-            ).mean()
-
             layer_losses.append(
-                position_loss
-                + direction_weight * direction_loss
+                torch.where(use_swap, swap_cost, identity_cost).mean()
             )
-
-            final_use_swap = use_swap
-            final_position_loss = position_loss
-            final_direction_loss = direction_loss
 
         self.loss = torch.stack(layer_losses).mean()
 
-        # Final-layer reporting in physical units
+        # final_loss = layer_losses[-1]
+
+        # if len(layer_losses) > 1:
+        #     auxiliary_loss = torch.stack(layer_losses[:-1]).mean()
+        # else:
+        #     auxiliary_loss = final_loss.new_zeros(())
+
+        # aux_weight = 0.2
+
+        # self.loss = final_loss + aux_weight * auxiliary_loss
+
         pred_positions = self.predictions["predicted_positions"]
         true_positions = self.target_dict["positions"]
 
-        matched_true_positions = torch.where(
-            final_use_swap[:, None, None],
+        matched_true = torch.where(
+            use_swap[:, None, None],
             true_positions.flip(dims=[1]),
             true_positions,
         )
 
         position_error = torch.linalg.vector_norm(
-            pred_positions - matched_true_positions,
-            dim=-1,
+            pred_positions - matched_true, dim=-1,
         )
 
         return {
             "loss": self.loss,
-            "position_loss": final_position_loss,
-            "direction_loss": final_direction_loss,
-            "weighted_direction_loss": (
-                direction_weight * final_direction_loss
-            ),
             "position_error_slot0": position_error[:, 0].mean(),
             "position_error_slot1": position_error[:, 1].mean(),
             "mean_position_error": position_error.mean(),
-            "swap_fraction": final_use_swap.float().mean(),
+            "swap_fraction": use_swap.float().mean(),
             "predicted_slot_separation": torch.linalg.vector_norm(
-                pred_positions[:, 0] - pred_positions[:, 1],
-                dim=-1,
+                pred_positions[:, 0] - pred_positions[:, 1], dim=-1,
             ).mean(),
             "true_slot_separation": torch.linalg.vector_norm(
-                true_positions[:, 0] - true_positions[:, 1],
-                dim=-1,
+                true_positions[:, 0] - true_positions[:, 1], dim=-1,
             ).mean(),
         }
+
+
+# ## direction loss
+
+    # def compute_metrics(self):
+    #     # Truth targets
+    #     true_positions_scaled = (
+    #         self.target_dict["positions"] - self.offset["positions"]
+    #     ) / self.scale["positions"]
+
+    #     true_directions = F.normalize(
+    #         self.target_dict["directions"],
+    #         p=2,
+    #         dim=-1,
+    #         eps=1e-8,
+    #     )
+
+    #     # Training with aux decoder outputs:
+    #     # [L, B, S, 6]
+    #     # Evaluation:
+    #     # [B, S, 6]
+    #     if self.model_out.dim() == self.stacked_target.dim() + 1:
+    #         per_layer_outputs = list(self.model_out)
+    #     else:
+    #         per_layer_outputs = [self.model_out]
+
+    #     layer_losses = []
+
+    #     final_use_swap = None
+    #     final_position_loss = None
+    #     final_direction_loss = None
+
+    #     direction_weight = 0.05
+
+    #     for layer_output in per_layer_outputs:
+    #         pred_positions_scaled = layer_output[..., :3]
+
+    #         pred_directions = F.normalize(
+    #             layer_output[..., 3:6],
+    #             p=2,
+    #             dim=-1,
+    #             eps=1e-8,
+    #         )
+
+    #         # Pairwise position cost:
+    #         # [B, predicted slot, truth slot]
+    #         pairwise_position_cost = F.huber_loss(
+    #             pred_positions_scaled.unsqueeze(2),
+    #             true_positions_scaled.unsqueeze(1),
+    #             delta=self.criterion.delta,
+    #             reduction="none",
+    #         ).mean(dim=-1)
+
+    #         identity_cost = (
+    #             pairwise_position_cost[:, 0, 0]
+    #             + pairwise_position_cost[:, 1, 1]
+    #         )
+
+    #         swap_cost = (
+    #             pairwise_position_cost[:, 0, 1]
+    #             + pairwise_position_cost[:, 1, 0]
+    #         )
+
+    #         use_swap = swap_cost < identity_cost
+
+    #         position_loss = torch.where(
+    #             use_swap,
+    #             swap_cost,
+    #             identity_cost,
+    #         ).mean()
+
+    #         # Use the position-derived assignment for directions
+    #         matched_true_directions = torch.where(
+    #             use_swap[:, None, None],
+    #             true_directions.flip(dims=[1]),
+    #             true_directions,
+    #         )
+
+    #         direction_loss = (
+    #             1.0
+    #             - torch.sum(
+    #                 pred_directions * matched_true_directions,
+    #                 dim=-1,
+    #             )
+    #         ).mean()
+
+    #         layer_losses.append(
+    #             position_loss
+    #             + direction_weight * direction_loss
+    #         )
+
+    #         final_use_swap = use_swap
+    #         final_position_loss = position_loss
+    #         final_direction_loss = direction_loss
+
+    #     self.loss = torch.stack(layer_losses).mean()
+
+    #     # Final-layer reporting in physical units
+    #     pred_positions = self.predictions["predicted_positions"]
+    #     true_positions = self.target_dict["positions"]
+
+    #     matched_true_positions = torch.where(
+    #         final_use_swap[:, None, None],
+    #         true_positions.flip(dims=[1]),
+    #         true_positions,
+    #     )
+
+    #     position_error = torch.linalg.vector_norm(
+    #         pred_positions - matched_true_positions,
+    #         dim=-1,
+    #     )
+
+    #     return {
+    #         "loss": self.loss,
+    #         "position_loss": final_position_loss,
+    #         "direction_loss": final_direction_loss,
+    #         "weighted_direction_loss": (
+    #             direction_weight * final_direction_loss
+    #         ),
+    #         "position_error_slot0": position_error[:, 0].mean(),
+    #         "position_error_slot1": position_error[:, 1].mean(),
+    #         "mean_position_error": position_error.mean(),
+    #         "swap_fraction": final_use_swap.float().mean(),
+    #         "predicted_slot_separation": torch.linalg.vector_norm(
+    #             pred_positions[:, 0] - pred_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #         "true_slot_separation": torch.linalg.vector_norm(
+    #             true_positions[:, 0] - true_positions[:, 1],
+    #             dim=-1,
+    #         ).mean(),
+    #     }
 
     def save_state(self, suffix="", name=None):
         self.state_data["target_sizes"] = self.target_sizes
