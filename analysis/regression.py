@@ -5,7 +5,146 @@ from abc import ABC, abstractmethod
 from analysis.read import WatChMaLOutput
 import watchmal.utils.math as math
 import analysis.utils.binning as bins
-from analysis.utils.plotting import plot_binned_values
+# from analysis.utils.plotting import plot_binned_values
+from analysis.utils.plotting import plot_binned_values, plot_2d_binned_values
+
+def plot_resolution_heatmaps(runs, quantity, binning, selection=None, statistic=None, min_entries=1,
+                             share_colour_scale=True, n_columns=None, fig_size=None, x_label="", y_label="",
+                             colorbar_label="", suptitle=None, **plot_args):
+    """
+    Plot a grid of resolution heat maps, one per run, using the same binning and (by default) the same colour scale so
+    that runs can be compared cell by cell.
+ 
+    Parameters
+    ----------
+    runs: sequence of RegressionRun
+        Sequence of run results. All runs must correspond to the same set of events as the binning quantities.
+    quantity: str or callable
+        Name of the attribute containing the reconstruction errors, or function returning them.
+    binning: ((np.ndarray, np.ndarray), (np.ndarray, np.ndarray))
+        Two-dimensional binning, as returned by `analysis.utils.binning.get_binning_2d`.
+    selection: indexing expression, optional
+        Selection of the events to use (by default use each run's own selection).
+    statistic: callable, optional
+        Statistic of each cell, by default `bins.binned_resolutions_2d`.
+    min_entries: int, optional
+        Cells with fewer than this many entries are left empty.
+    share_colour_scale: bool, optional
+        If True (default), use one colour scale across all runs, taken from the range of all plotted values.
+    n_columns: int, optional
+        Number of columns in the grid of plots. By default, use a roughly square grid.
+    fig_size: (float, float), optional
+        Size of the whole figure.
+    x_label, y_label: str, optional
+        Labels of the axes.
+    colorbar_label: str, optional
+        Label for the colour bars.
+    suptitle: str, optional
+        Overall title of the figure.
+    plot_args: optional
+        Additional arguments passed to `plot_2d_binned_values`.
+ 
+    Returns
+    -------
+    fig: matplotlib.figure.Figure
+    axes: np.ndarray of matplotlib.axes.Axes
+    values: dict
+        Dictionary mapping each run label to its two-dimensional array of binned statistics.
+    """
+    runs = list(runs)
+    results = {r.run_label: r.binned_statistic_2d(quantity, binning, selection, statistic, min_entries) for r in runs}
+    if share_colour_scale and 'v_lim' not in plot_args:
+        finite = np.concatenate([v[np.isfinite(v)].flatten() for v, _ in results.values()])
+        if finite.size:
+            plot_args['v_lim'] = (np.min(finite), np.max(finite))
+ 
+    n_columns = int(np.ceil(np.sqrt(len(runs)))) if n_columns is None else n_columns
+    n_rows = int(np.ceil(len(runs) / n_columns))
+    fig, axes = plt.subplots(n_rows, n_columns, figsize=fig_size, squeeze=False)
+    for ax, r in zip(axes.flatten(), runs):
+        values, counts = results[r.run_label]
+        plot_2d_binned_values(values, binning, counts=counts, ax=ax, title=r.run_label, x_label=x_label,
+                              y_label=y_label, colorbar_label=colorbar_label, **plot_args)
+    for ax in axes.flatten()[len(runs):]:
+        ax.set_visible(False)
+    if suptitle is not None:
+        fig.suptitle(suptitle)
+    fig.tight_layout()
+    return fig, axes, {label: values for label, (values, _) in results.items()}
+ 
+def plot_resolution_difference_heatmap(run, reference_run, quantity, binning, selection=None, statistic=None,
+                                       min_entries=1, relative=True, percent=True, cmap='RdBu_r', label_format=None,
+                                       colorbar_label=None, title=None, **plot_args):
+    """
+    Plot the cell-by-cell difference in resolution between a run and a reference run, e.g. a GNN against the ResNet
+    baseline. Negative values (blue by default) mean the run is better than the reference. Cells empty in either run
+    are left empty.
+ 
+    Parameters
+    ----------
+    run: RegressionRun
+        Run whose resolution is being compared.
+    reference_run: RegressionRun
+        Reference run to compare against.
+    quantity: str or callable
+        Name of the attribute containing the reconstruction errors, or function returning them.
+    binning: ((np.ndarray, np.ndarray), (np.ndarray, np.ndarray))
+        Two-dimensional binning, as returned by `analysis.utils.binning.get_binning_2d`.
+    selection: indexing expression, optional
+        Selection of the events to use (by default use each run's own selection).
+    statistic: callable, optional
+        Statistic of each cell, by default `bins.binned_resolutions_2d`.
+    min_entries: int, optional
+        Cells with fewer than this many entries in either run are left empty.
+    relative: bool, optional
+        If True (default), plot the change relative to the reference run rather than the absolute difference.
+    percent: bool, optional
+        If True (default), express the relative difference as a percentage. Ignored if `relative` is False.
+    cmap: str, optional
+        Colour map, diverging by default since the difference is centred on zero.
+    label_format: str, optional
+        Format of the cell labels. By default, '{:+.1f}%' for relative differences and '{:+.2f}' otherwise.
+    colorbar_label: str, optional
+        Label for the colour bar. A sensible default is used if not given.
+    title: str, optional
+        Title of the figure. By default, describes the two runs being compared.
+    plot_args: optional
+        Additional arguments passed to `plot_2d_binned_values`.
+ 
+    Returns
+    -------
+    fig: matplotlib.figure.Figure
+    ax: matplotlib.axes.Axes
+    difference: np.ndarray
+        Two-dimensional array of the plotted differences.
+    """
+    values, counts = run.binned_statistic_2d(quantity, binning, selection, statistic, min_entries)
+    reference, _ = reference_run.binned_statistic_2d(quantity, binning, selection, statistic, min_entries)
+    difference = values - reference
+    if relative:
+        with np.errstate(divide='ignore', invalid='ignore'):
+            difference = np.where(reference != 0, difference / reference, np.nan)
+        if percent:
+            difference = difference * 100
+        if label_format is None:
+            label_format = '{:+.1f}%' if percent else '{:+.2f}'
+        if colorbar_label is None:
+            colorbar_label = "Relative difference [%]" if percent else "Relative difference"
+    else:
+        if label_format is None:
+            label_format = '{:+.2f}'
+        if colorbar_label is None:
+            colorbar_label = "Difference"
+    if title is None:
+        title = f"{run.run_label} vs {reference_run.run_label}"
+    plot_args.setdefault('centre', 0)
+    fig, ax, _ = plot_2d_binned_values(difference, binning, counts=counts, cmap=cmap, label_format=label_format,
+                                       colorbar_label=colorbar_label, title=title, **plot_args)
+    return fig, ax, difference
+
+
+
+
 
 
 def plot_histograms(runs, quantity, selection=None, ax=None, fig_size=None, x_label="", y_label="", legend='best', **hist_args):
@@ -347,6 +486,95 @@ class RegressionRun(ABC):
             selection = self.selection
         values = self.get_quantity(quantity)
         return plot_binned_values(ax, bins.binned_mean, values, binning, selection, errors, x_errors, **plot_args)
+    
+    
+    def binned_statistic_2d(self, quantity, binning, selection=None, statistic=None, min_entries=1):
+        """
+        Calculate a summary statistic of a quantity of this run in each cell of a two-dimensional binning.
+
+        Parameters
+        ----------
+        quantity: str or callable
+            Name of the attribute containing the array of values, or function that takes the run as its only argument and
+            returns the values, e.g. 'position_3d_errors' or 'direction_errors'.
+        binning: ((np.ndarray, np.ndarray), (np.ndarray, np.ndarray))
+            Two-dimensional binning, as returned by `analysis.utils.binning.get_binning_2d`.
+        selection: indexing expression, optional
+            Selection of the events to use (by default use this run's selection).
+        statistic: callable, optional
+            Function taking the nested list of binned values and returning a two-dimensional array of statistics, e.g.
+            `bins.binned_mean_2d`. By default, `bins.binned_resolutions_2d`.
+        min_entries: int, optional
+            Cells with fewer than this many entries are left empty.
+
+        Returns
+        -------
+        statistic: np.ndarray
+            Two-dimensional array of the statistic in each cell.
+        counts: np.ndarray
+            Two-dimensional array of the number of entries in each cell.
+        """
+        if selection is None:
+            selection = self.selection
+        if statistic is None:
+            statistic = bins.binned_resolutions_2d
+        binned_values = bins.apply_binning_2d(self.get_quantity(quantity), binning, selection)
+        return statistic(binned_values, min_entries), bins.binned_counts_2d(binned_values)
+
+    def plot_binned_resolution_2d(self, quantity, binning, selection=None, statistic=None, min_entries=1, title=None,
+                                  **plot_args):
+        """
+        Plot the resolution of a quantity of this run in a two-dimensional binning, as a heat map with the resolution of
+        each cell drawn on the cell.
+
+        Parameters
+        ----------
+        quantity: str or callable
+            Name of the attribute containing the reconstruction errors, or function returning them.
+        binning: ((np.ndarray, np.ndarray), (np.ndarray, np.ndarray))
+            Two-dimensional binning, as returned by `analysis.utils.binning.get_binning_2d`.
+        selection: indexing expression, optional
+            Selection of the events to use (by default use this run's selection).
+        statistic: callable, optional
+            Statistic of each cell, by default `bins.binned_resolutions_2d`.
+        min_entries: int, optional
+            Cells with fewer than this many entries are left empty.
+        title: str, optional
+            Title of the figure. By default, this run's label.
+        plot_args: optional
+            Additional arguments passed to `plot_2d_binned_values`, e.g. `x_label`, `y_label`, `label_format`,
+            `show_counts`, `v_lim`, `cmap`.
+
+        Returns
+        -------
+        fig: matplotlib.figure.Figure
+        ax: matplotlib.axes.Axes
+        values: np.ndarray
+            Two-dimensional array of the plotted statistic, so it can be reused, e.g. for a difference plot.
+        """
+        values, counts = self.binned_statistic_2d(quantity, binning, selection, statistic, min_entries)
+        fig, ax, _ = plot_2d_binned_values(values, binning, counts=counts,
+                                           title=self.run_label if title is None else title, **plot_args)
+        return fig, ax, values
+
+    def plot_binned_bias_2d(self, quantity, binning, selection=None, min_entries=1, **plot_args):
+        """
+        Plot the bias (mean) of a quantity of this run in a two-dimensional binning, as a heat map with the bias of each
+        cell drawn on the cell. A diverging colour scale centred on zero is used by default.
+
+        Parameters are as for `plot_binned_resolution_2d`.
+
+        Returns
+        -------
+        fig: matplotlib.figure.Figure
+        ax: matplotlib.axes.Axes
+        values: np.ndarray
+        """
+        plot_args.setdefault('cmap', 'RdBu_r')
+        plot_args.setdefault('centre', 0)
+        plot_args.setdefault('label_format', '{:+.2f}')
+        return self.plot_binned_resolution_2d(quantity, binning, selection=selection, statistic=bins.binned_mean_2d,
+                                              min_entries=min_entries, **plot_args)
 
 
 class MomentumPrediction(ABC):
@@ -859,3 +1087,4 @@ class CombinedRegressionRun(RegressionRun):
             if hasattr(r, attr):
                 return getattr(r, attr)
         raise AttributeError(attr)
+

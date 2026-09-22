@@ -129,57 +129,162 @@ def plot_binned_values(ax, func, values, binning, selection=None, errors=False, 
 
 #     im = ax.imshow(vals)
 
-def plot_binned_values_2d(
-    ax,
-    func,
-    values,
-    binning_1,
-    binning_2,
-    selection=None,
-    errors=False,
-    **plot_args,
-):
-    values = np.asarray(values)
+# def plot_binned_values_2d(
+#     ax,
+#     func,
+#     values,
+#     binning_x,
+#     binning_y,
+#     selection=None,
+#     **plot_args,
+# ):
+#     binned_values = bins.apply_binning_2d(
+#         values,
+#         binning_x,
+#         binning_y,
+#         selection,
+#     )
 
-    if selection is None:
-        selection = np.ones(len(values), dtype=bool)
+#     z = func(binned_values)
 
-    selected_values = values[selection]
-    bin_indices_1 = binning_1[1][selection]
-    bin_indices_2 = binning_2[1][selection]
+#     im = ax.pcolormesh(
+#         binning_x[0],
+#         binning_y[0],
+#         z,
+#         shading="auto",
+#         **plot_args,
+#     )
 
-    n_bins_1 = len(binning_1[0]) - 1
-    n_bins_2 = len(binning_2[0]) - 1
+#     return im
 
-    arr = [
-        [[] for _ in range(n_bins_1)]
-        for _ in range(n_bins_2)
-    ]
 
-    for value, bin_1, bin_2 in zip(
-        selected_values,
-        bin_indices_1,
-        bin_indices_2,
-    ):
-        if (
-            1 <= bin_1 <= n_bins_1
-            and 1 <= bin_2 <= n_bins_2
-        ):
-            arr[bin_2 - 1][bin_1 - 1].append(value)
-
-    vals = func(arr, errors)
-
-    im = ax.imshow(
-        vals,
-        origin="lower",
-        aspect="auto",
-        extent=[
-            binning_1[0][0],
-            binning_1[0][-1],
-            binning_2[0][0],
-            binning_2[0][-1],
-        ],
-        **plot_args,
-    )
-
-    return im
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize, LogNorm, TwoSlopeNorm
+ 
+ 
+def _cell_label_colour(cmap, norm, value, label_colour):
+    """Choose a readable text colour for a heat map cell, based on the luminance of its fill colour."""
+    if label_colour != 'auto':
+        return label_colour
+    rgba = cmap(float(norm(value)))
+    luminance = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2]
+    return 'w' if luminance < 0.55 else 'k'
+ 
+ 
+def plot_2d_binned_values(values, binning, counts=None, ax=None, fig_size=None, cmap='viridis', v_lim=None,
+                          log_colour=False, centre=None, colorbar=True, colorbar_label='', label_format='{:.2f}',
+                          label_size=None, label_colour='auto', show_counts=False, count_format='n={:.0f}',
+                          empty_colour='0.9', x_label='', y_label='', title=None, x_scale=None, y_scale=None,
+                          **mesh_args):
+    """
+    Plot a two-dimensional array of binned statistics as a heat map, with the value of each cell drawn on the cell.
+ 
+    Parameters
+    ----------
+    values: np.ndarray
+        Two-dimensional array of shape (n_x_bins, n_y_bins), as returned by `binned_resolutions_2d` etc.
+    binning: ((np.ndarray, np.ndarray), (np.ndarray, np.ndarray))
+        Two-dimensional binning, as returned by `get_binning_2d`. Only the bin edges are used.
+    counts: np.ndarray, optional
+        Two-dimensional array of the number of entries in each cell, to annotate cells if `show_counts` is True.
+    ax: matplotlib.axes.Axes, optional
+        Axes to draw the plot. If not provided, a new figure and axes is created.
+    fig_size: (float, float), optional
+        Figure size. Ignored if `ax` is provided.
+    cmap: str or matplotlib.colors.Colormap, optional
+        Colour map for the cells.
+    v_lim: (float, float), optional
+        Range of the colour scale. By default, the range of the finite values.
+    log_colour: bool, optional
+        If True, use a logarithmic colour scale (all plotted values must be positive).
+    centre: float, optional
+        If given, use a diverging colour scale centred on this value, e.g. `centre=0` for bias or difference plots.
+        Ignored if `log_colour` is True.
+    colorbar: bool, optional
+        If True (default), draw a colour bar.
+    colorbar_label: str, optional
+        Label for the colour bar.
+    label_format: str or callable or None, optional
+        Format of the value drawn on each cell, either a format string such as '{:.2f}' (default) or a function taking
+        the value and returning a string. Use None for no labels.
+    label_size: float, optional
+        Font size of the cell labels.
+    label_colour: str, optional
+        Colour of the cell labels. By default ('auto') pick black or white per cell for contrast with the cell colour.
+    show_counts: bool, optional
+        If True, also draw the number of entries in each cell below its value.
+    count_format: str, optional
+        Format of the number of entries drawn on each cell.
+    empty_colour: str, optional
+        Colour used for cells with no value (fewer entries than `min_entries`).
+    x_label, y_label: str, optional
+        Labels of the axes.
+    title: str, optional
+        Title of the figure.
+    x_scale, y_scale: str, optional
+        Scale of the axes, e.g. 'log' when using logarithmically spaced bin edges.
+    mesh_args: optional
+        Additional arguments passed to `pcolormesh`.
+ 
+    Returns
+    -------
+    fig: matplotlib.figure.Figure
+    ax: matplotlib.axes.Axes
+    mesh: matplotlib.collections.QuadMesh
+    """
+    (x_edges, _), (y_edges, _) = binning
+    values = np.asarray(values, dtype=float)
+    if values.shape != (x_edges.size - 1, y_edges.size - 1):
+        raise ValueError(f"Values of shape {values.shape} do not match the binning "
+                         f"({x_edges.size - 1}, {y_edges.size - 1})")
+    if ax is None:
+        fig, ax = plt.subplots(figsize=fig_size)
+    else:
+        fig = ax.get_figure()
+ 
+    finite = values[np.isfinite(values)]
+    if v_lim is None:
+        v_min, v_max = (np.min(finite), np.max(finite)) if finite.size else (0.0, 1.0)
+    else:
+        v_min, v_max = v_lim
+    if log_colour:
+        norm = LogNorm(vmin=max(v_min, np.finfo(float).tiny), vmax=v_max)
+    elif centre is not None:
+        half_range = max(abs(v_max - centre), abs(centre - v_min)) or 1.0
+        norm = TwoSlopeNorm(vcenter=centre, vmin=centre - half_range, vmax=centre + half_range)
+    else:
+        norm = Normalize(vmin=v_min, vmax=v_max)
+ 
+    cmap = plt.get_cmap(cmap).copy()
+    cmap.set_bad(empty_colour)
+    ax.set_facecolor(empty_colour)
+    mesh = ax.pcolormesh(x_edges, y_edges, np.ma.masked_invalid(values).T, cmap=cmap, norm=norm, **mesh_args)
+ 
+    if label_format is not None:
+        formatter = label_format.format if isinstance(label_format, str) else label_format
+        x_centres = (x_edges[1:] + x_edges[:-1]) / 2
+        y_centres = (y_edges[1:] + y_edges[:-1]) / 2
+        for i, x in enumerate(x_centres):
+            for j, y in enumerate(y_centres):
+                value = values[i, j]
+                if not np.isfinite(value):
+                    continue
+                text = formatter(value)
+                if show_counts and counts is not None:
+                    text += "\n" + count_format.format(counts[i, j])
+                ax.text(x, y, text, ha='center', va='center', fontsize=label_size,
+                        color=_cell_label_colour(cmap, norm, value, label_colour))
+ 
+    if x_scale is not None:
+        ax.set_xscale(x_scale)
+    if y_scale is not None:
+        ax.set_yscale(y_scale)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    if title is not None:
+        ax.set_title(title)
+    if colorbar:
+        fig.colorbar(mesh, ax=ax, label=colorbar_label)
+    return fig, ax, mesh
+ 
+ 

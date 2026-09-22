@@ -72,7 +72,34 @@ def apply_binning(values, binning, selection=...):
     data = values[selection]
     data_bins = binning[1][selection]
     return [data[data_bins == b] for b in range(1, binning[0].size)]
+# def apply_binning_2d(values, binning_x, binning_y, selection=None):
+#     """
+#     Bin values in two quantities.
 
+#     Returns
+#     -------
+#     list[list[np.ndarray]]
+#         Shape is [n_y_bins][n_x_bins].
+#     """
+#     values = np.asarray(values)
+
+#     if selection is None:
+#         selection = np.ones(len(values), dtype=bool)
+
+#     values = values[selection]
+#     x_indices = binning_x[1][selection]
+#     y_indices = binning_y[1][selection]
+
+#     n_x = len(binning_x[0]) - 1
+#     n_y = len(binning_y[0]) - 1
+
+#     return [
+#         [
+#             values[(x_indices == x + 1) & (y_indices == y + 1)]
+#             for x in range(n_x)
+#         ]
+#         for y in range(n_y)
+#     ]
 
 def unapply_binning(binned_values, binning, selection=...):
     """
@@ -263,3 +290,171 @@ def bin_centres(bins):
 def bin_halfwidths(bins):
     """Array of bin half-widths for an array of bin edges"""
     return (bins[1:]-bins[:-1])/2
+
+ 
+def get_binning_2d(x, y, x_bins=None, y_bins=None, x_range=(None, None), y_range=(None, None),
+                   x_width=None, y_width=None):
+    """
+    Bin events in two quantities at once, by applying `get_binning` to each of them.
+ 
+    Parameters
+    ----------
+    x: array_like
+        Input array to be binned along the x-axis.
+    y: array_like
+        Input array to be binned along the y-axis.
+    x_bins, y_bins: array_like, optional
+        Number of equal-width bins, or array of bin edges, for each axis. See `get_binning`.
+    x_range, y_range: (int or real, int or real), optional
+        Lowest lower edge and highest upper edge of each axis. See `get_binning`.
+    x_width, y_width: int or real, optional
+        Width of equal-width bins for each axis, if the number of bins is not given. See `get_binning`.
+ 
+    Returns
+    -------
+    ((np.ndarray, np.ndarray), (np.ndarray, np.ndarray))
+        Pair of (bin edges, bin indices) tuples, as returned by `get_binning`, for the x and y axes respectively.
+    """
+    x_binning = get_binning(x, x_bins, x_range[0], x_range[1], x_width)
+    y_binning = get_binning(y, y_bins, y_range[0], y_range[1], y_width)
+    if x_binning[1].shape != y_binning[1].shape:
+        raise ValueError("The x and y binning quantities must have the same shape (one entry per event)")
+    return x_binning, y_binning
+ 
+    
+def apply_binning_2d(values, binning, selection=...):
+    """
+    Two-dimensional equivalent of `apply_binning`. Returns a nested list of arrays, where element [i][j] contains the
+    values assigned to the ith bin in x and the jth bin in y.
+ 
+    As in `apply_binning`, values falling outside the binning range (including values equal to the highest bin edge,
+    which `np.digitize` assigns to the overflow bin) are not included in any bin.
+ 
+    Parameters
+    ----------
+    values: array_like
+        Values to be partitioned into bins.
+    binning: ((np.ndarray, np.ndarray), (np.ndarray, np.ndarray))
+        Two-dimensional binning, as returned by `get_binning_2d`.
+    selection: index expression, optional
+        If provided, then `values` is indexed using this selection so that only the values that pass the selection are
+        binned. As in `apply_binning`, if there are twice as many values as entries in the selection (e.g. two rings per
+        event), the selection is duplicated to cover both.
+ 
+    Returns
+    -------
+    list of list of np.ndarray
+        Nested list of arrays of values assigned to each cell, of shape (n_x_bins, n_y_bins).
+    """
+    (x_edges, x_indices), (y_edges, y_indices) = binning
+    values = np.asarray(values)
+    if selection is not ... and len(values) // len(selection) == 2:
+        selection = np.concatenate((selection, selection))
+    data = values[selection]
+    x_bins = x_indices[selection]
+    y_bins = y_indices[selection]
+    n_x, n_y = x_edges.size - 1, y_edges.size - 1
+ 
+    in_range = (x_bins >= 1) & (x_bins <= n_x) & (y_bins >= 1) & (y_bins <= n_y)
+    flat_bins = (x_bins[in_range] - 1) * n_y + (y_bins[in_range] - 1)
+    data = data[in_range]
+    order = np.argsort(flat_bins, kind="stable")
+    flat_bins, data = flat_bins[order], data[order]
+    cell_edges = np.searchsorted(flat_bins, np.arange(n_x * n_y + 1))
+    return [[data[cell_edges[i * n_y + j]:cell_edges[i * n_y + j + 1]] for j in range(n_y)] for i in range(n_x)]
+
+    
+def binned_resolutions_2d(binned_residuals, min_entries=1):
+    """
+    Calculate resolution defined as the 68th percentile of the absolute residuals for each cell of a two-dimensional
+    binning. Cells with too few entries are returned as NaN.
+ 
+    Parameters
+    ----------
+    binned_residuals: list of list of array_like
+        Nested list of arrays of float residuals in each cell, returned from `apply_binning_2d`.
+    min_entries: int, optional
+        Cells containing fewer than this many entries are returned as NaN, to avoid quoting a resolution from a handful
+        of events. Default is 1, i.e. only empty cells are NaN.
+ 
+    Returns
+    -------
+    np.ndarray
+        Two-dimensional array of resolutions of the cells' residuals, of shape (n_x_bins, n_y_bins).
+    """
+    return np.array([[np.nanquantile(np.abs(cell), 0.68) if np.size(cell) >= max(min_entries, 1) else np.nan
+                      for cell in row] for row in binned_residuals])
+ 
+def binned_mean_2d(binned_values, min_entries=1):
+    """
+    Calculate the mean of the values in each cell of a two-dimensional binning, for use as a bias.
+ 
+    Parameters
+    ----------
+    binned_values: list of list of array_like
+        Nested list of arrays of values in each cell, returned from `apply_binning_2d`.
+    min_entries: int, optional
+        Cells containing fewer than this many entries are returned as NaN.
+ 
+    Returns
+    -------
+    np.ndarray
+        Two-dimensional array of means of the cells' values.
+    """
+    return np.array([[np.mean(cell) if np.size(cell) >= max(min_entries, 1) else np.nan
+                      for cell in row] for row in binned_values])
+ 
+def binned_quantiles_2d(binned_values, quantile, min_entries=1):
+    """
+    Calculate a quantile of the values in each cell of a two-dimensional binning.
+ 
+    Parameters
+    ----------
+    binned_values: list of list of array_like
+        Nested list of arrays of values in each cell, returned from `apply_binning_2d`.
+    quantile: float
+        Quantile value to find in each cell.
+    min_entries: int, optional
+        Cells containing fewer than this many entries are returned as NaN.
+ 
+    Returns
+    -------
+    np.ndarray
+        Two-dimensional array of quantiles of the cells' values.
+    """
+    return np.array([[np.nanquantile(cell, quantile) if np.size(cell) >= max(min_entries, 1) else np.nan
+                      for cell in row] for row in binned_values])
+ 
+def binned_counts_2d(binned_values):
+    """
+    Count the entries in each cell of a two-dimensional binning.
+ 
+    Parameters
+    ----------
+    binned_values: list of list of array_like
+        Nested list of arrays of values in each cell, returned from `apply_binning_2d`.
+ 
+    Returns
+    -------
+    np.ndarray
+        Two-dimensional array of the number of entries in each cell.
+    """
+    return np.array([[np.size(cell) for cell in row] for row in binned_values])
+ 
+def binned_std_errors_2d(binned_residuals):
+    """
+    Calculate standard errors for each cell of a two-dimensional binning.
+ 
+    Parameters
+    ----------
+    binned_residuals: list of list of array_like
+        Nested list of arrays of float residuals in each cell, returned from `apply_binning_2d`.
+ 
+    Returns
+    -------
+    np.ndarray
+        Two-dimensional array of standard errors of the cells' residuals.
+    """
+    return np.array([[np.std(cell) / np.sqrt(np.size(cell)) if np.size(cell) else np.nan
+                      for cell in row] for row in binned_residuals])
+ 

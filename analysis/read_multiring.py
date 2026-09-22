@@ -90,20 +90,6 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
             return self.read_training_log_from_csv(directory)
 
 #     def get_outputs(self, name, concatenate=False):
-#         """
-#         Read the outputs resulting from the evaluation run of a WatChMaL model.
-
-#         Parameters
-#         ----------
-#         name: str
-#             name of the output to load
-
-#         Returns
-#         -------
-#         np.ndarray
-#             Two dimensional array of predicted softmax values, where each row corresponds to an event and each column
-#             contains the softmax values of a class.
-#         """
 #         outputs = np.load(self.directory + "/outputs/" + name + ".npy")        
 #         output_indices = np.load(self.directory + "/outputs/indices.npy")        
 #         if self.indices is None:            
@@ -127,20 +113,6 @@ class WatChMaLOutput(ABC, metaclass=ABCMeta):
         
 #         return outputs.squeeze() 
     def get_outputs(self, name,  select_ring=True, concatenate=True):
-        """
-        Read the outputs resulting from the evaluation run of a WatChMaL model.
-
-        Parameters
-        ----------
-        name: str
-            name of the output to load
-
-        Returns
-        -------
-        np.ndarray
-            Two dimensional array of predicted softmax values, where each row corresponds to an event and each column
-            contains the softmax values of a class.
-        """
         outputs = np.load(self.directory + "/outputs/" + name + ".npy")        
         output_indices = np.load(self.directory + "/outputs/indices.npy")        
         if self.indices is None:            

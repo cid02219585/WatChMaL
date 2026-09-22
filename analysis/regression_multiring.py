@@ -174,8 +174,6 @@ def plot_resolution_profile_2d(
             **run.plot_args,
         }
 
-        # Remove ordinary line-plot arguments that imshow
-        # does not understand.
         args.pop("label", None)
         args.pop("marker", None)
         args.pop("linestyle", None)
@@ -197,7 +195,6 @@ def plot_resolution_profile_2d(
         ax.set_xlabel(x_label)
         ax.set_ylabel(y_label)
 
-        # Adapt this depending on how your run name is stored.
         ax.set_title(
             getattr(run, "label", getattr(run, "name", ""))
         )
