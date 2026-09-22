@@ -1,3 +1,6 @@
+### h5 dataset for two ring events 
+# largely copied from the single ring h5 dataset
+
 """
 Class for loading data in h5 format
 """

@@ -1,3 +1,6 @@
+### Dataset for heterogeneous graphs for two ring events
+# hit only nodes with a virtual node with summary statistics
+
 import numpy as np
 import torch
 
@@ -16,10 +19,6 @@ barrel_map_array_idxs = np.array([6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 15, 16, 
 pmts_per_mpmt = 19
 
 
-# idk if it should be only hit mpmts or empty ones too - quite sparse no?
-# i think need to make it spatial and time realted for multiring side
-
-
 class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
 
     def __init__(self, h5file, geometry_file, k_neighbors, use_orientations=False, transforms=None, is_distributed=True, max_points=None, use_memmap=True):
@@ -29,7 +28,7 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         geo_positions = torch.from_numpy(geo_file["position"]).float()
         geo_orientations = torch.from_numpy(geo_file["orientation"]).float()
         self.pmt_positions = geo_file["position"].T
-        # self.mpmt_positions = geo_positions[18::19, :].T # 18th is the reference pmt - what you take for the pos and orientation - guessing it's the central one?
+        # self.mpmt_positions = geo_positions[18::19, :].T # 18th is the reference pmt 
         # self.mpmt_orientations = geo_orientations[18::19, :].T
         self.mpmt_positions = geo_file["position"][18::19, :].T   # numpy
         self.mpmt_orientations = geo_file["orientation"][18::19, :].T  # numpy
@@ -104,8 +103,8 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
             # hit_pmt_in_modules[:, None] / 19.
         ], axis=1)
 
-        # PMT -> mPMT: each hit PMT connects to its parent mPMT
-        # inverse_indices maps hit PMT i -> index in unique_mpmts
+        # PMT -> mPMT so each hit PMT connects to its parent mPMT
+        # inverse_indices maps hit PMT to mPMT
         n_hits_total = len(self.event_hit_pmts)
         pmt_to_mpmt = torch.tensor(
             np.array([np.arange(n_hits_total), inverse_indices]), dtype=torch.long
@@ -115,7 +114,7 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         # same_mpmt = build_same_mpmt_edges(pmt_to_mpmt, n_mpmts)
         # hetero_data['pmt', 'same_mpmt', 'pmt'].edge_index = same_mpmt
 
-        # mPMT -> mPMT: k-NN on mPMT positions
+        # mPMT -> mPMT: kNN on mPMT positions
         mpmt_pos_tensor = torch.tensor(mpmt_pos / 100., dtype=torch.float32)
         mpmt_to_mpmt = knn_graph(mpmt_pos_tensor, k=min(self.k_neighbors, n_mpmts - 1)).long()
 
@@ -136,7 +135,7 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
         # else:
         #     pmt_to_pmt = torch.empty((2, 0), dtype=torch.long)
 
-        # PMT -> PMT: connect hit PMTs inside the same mPMT
+        # PMT -> PMT: connect hit PMTs inside the same mPMT (still with knn restriction)
         pmt_edges = []
 
         for mpmt_local_idx in range(n_mpmts):
@@ -150,12 +149,9 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
             # local PMT positions within this mPMT
             pos = torch.tensor(local_pos[hit_idxs], dtype=torch.float32)
 
-            # connect each hit PMT to nearest neighbours inside the same mPMT
             k_pmt = min(3, len(hit_idxs) - 1)
 
             local_edge_index = knn_graph(pos, k=k_pmt).long()
-
-            # remap local indices back to global hit-PMT node indices
             global_edge_index = torch.tensor(hit_idxs, dtype=torch.long)[local_edge_index]
 
             pmt_edges.append(global_edge_index)
@@ -218,8 +214,8 @@ class GNNMultiPMTDataset(H5Dataset): # renamed for GNNs
 
         virtual_node = np.array([[
             n_mpmts / self.mpmt_positions.shape[1],
-            np.sum(total_charge) / n_mpmts,  # mean charge per mPMT rather than total
-            mean_time.mean() / 1000.,         # consistent with pmt time normalisation
+            np.sum(total_charge) / n_mpmts,  # mean charge per mPMT
+            mean_time.mean() / 1000.,
             self.event_hit_times.min() / 1000.,
         ]])
         hetero_data['virtual_node'].x = torch.tensor(virtual_node, dtype=torch.float32)

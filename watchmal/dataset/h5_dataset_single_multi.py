@@ -1,4 +1,6 @@
-"""H5 loader for a combined single-ring / two-ring dataset."""
+### h5 dataset for variable single and two ring events 
+# designed to load in data from two separate h5 files (one single and one two ring) with a shared npz file that has the local (per file) and global indices
+# includes padding of single ring events and the ring mask
 
 import h5py
 import numpy as np
@@ -6,30 +8,6 @@ from torch.utils.data import Dataset
 from watchmal.utils.math import direction_from_angles, momentum_from_energy
 
 class H5Dataset(Dataset):
-    """
-    Load events from two HDF5 files through one global index space.
-
-    Index convention
-    ----------------
-    0 <= item < n_single
-        -> single_h5[item]
-
-    n_single <= item < n_single + n_multi
-        -> multi_h5[item - n_single]
-
-    The class deliberately exposes ``event_hit_pmts``,
-    ``event_hit_times`` and ``event_hit_charges`` in the same way as the
-    existing WatChMaL H5Dataset so downstream detector representations can
-    continue to use them.
-
-    Position targets are always returned with two slots:
-
-        single ring: positions.shape == (2, 3), ring_mask == [1, 0]
-        two rings:   positions.shape == (2, 3), ring_mask == [1, 1]
-
-    The empty position slot for a single-ring event is zero padded. The loss
-    must use ``ring_mask`` so that this padded slot receives no position loss.
-    """
 
     def __init__(
         self,
@@ -66,7 +44,6 @@ class H5Dataset(Dataset):
         self.multi_hit_time = None
         self.multi_hit_charge = None
 
-        # Interface used by downstream WatChMaL dataset classes.
         self.event_hit_pmts = None
         self.event_hit_times = None
         self.event_hit_charges = None
@@ -75,7 +52,6 @@ class H5Dataset(Dataset):
         return self.dataset_length
 
     def set_target(self, target_key):
-        """Store the requested target key(s), matching the normal H5Dataset API."""
         self.target_key = target_key
 
     def _load_hits(self, h5_file, h5_path, h5_key):
@@ -93,7 +69,6 @@ class H5Dataset(Dataset):
         return np.array(data)
 
     def initialize(self):
-        """Open both H5 files lazily inside the dataloader worker."""
         self.single_h5 = h5py.File(self.single_h5file, "r")
         self.multi_h5 = h5py.File(self.multi_h5file, "r")
 
@@ -142,7 +117,6 @@ class H5Dataset(Dataset):
         self.initialized = True
 
     def _resolve_event(self, item):
-        """Return H5 objects and local index corresponding to a global index."""
         item = int(item)
 
         if item < 0 or item >= self.dataset_length:
@@ -205,9 +179,6 @@ class H5Dataset(Dataset):
         n_rings = event["n_rings"]
         h5_file = event["h5"]
 
-        # ----------------------------------------------------
-        # Event hits
-        # ----------------------------------------------------
         start = event["event_hits_index"][local_idx]
         stop = event["event_hits_index"][local_idx + 1]
 
@@ -215,9 +186,6 @@ class H5Dataset(Dataset):
         self.event_hit_times = event["hit_time"][start:stop]
         self.event_hit_charges = event["hit_charge"][start:stop]
 
-        # ----------------------------------------------------
-        # Position and direction truth: always two slots
-        # ----------------------------------------------------
         if n_rings == 1:
             positions = np.asarray(
                 h5_file["positions"][local_idx],
@@ -238,20 +206,12 @@ class H5Dataset(Dataset):
                 local_idx,
             )
 
-
-        # ----------------------------------------------------
-        # Pad single-ring events to two slots
-        # ----------------------------------------------------
         padded_positions = np.zeros((2, 3), dtype=np.float32)
         padded_positions[:n_rings] = positions[:n_rings]
 
         padded_directions = np.zeros((2, 3), dtype=np.float32)
         padded_directions[:n_rings] = directions[:n_rings]
 
-
-        # ----------------------------------------------------
-        # Real-ring mask
-        # ----------------------------------------------------
         ring_mask = np.zeros(2, dtype=np.float32)
         ring_mask[:n_rings] = 1.0
 

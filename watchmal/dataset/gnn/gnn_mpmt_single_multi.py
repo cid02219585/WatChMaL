@@ -1,4 +1,5 @@
-"""GNN mPMT dataset for mixed one-ring / two-ring reconstruction."""
+### Heterogeneous dataset for mixed single ring and two ring events
+# outputs the ring mask for classification as well
 
 import numpy as np
 import torch
@@ -17,13 +18,6 @@ pmts_per_mpmt = 19
 
 
 class GNNMultiPMTDataset(H5Dataset):
-    """
-    Graph representation for the combined single-ring/two-ring H5 dataset.
-
-    Input graph construction is intentionally kept the same as your existing
-    GNNMultiPMTDataset. The main difference is that the base H5 loader can
-    retrieve an event from either source H5 and returns ``ring_mask``.
-    """
 
     def __init__(
         self,
@@ -58,16 +52,12 @@ class GNNMultiPMTDataset(H5Dataset):
         self.max_points = max_points
         self.use_orientations = use_orientations
 
-        # Kept in the signature for compatibility with your existing configs.
         self.transforms = transforms
         self.is_distributed = is_distributed
 
     def __getitem__(self, item):
         data_dict = super().__getitem__(item)
 
-        # ====================================================
-        # Hit PMT / mPMT bookkeeping
-        # ====================================================
         hit_mpmts = self.event_hit_pmts // pmts_per_mpmt
         hit_pmt_in_modules = self.event_hit_pmts % pmts_per_mpmt
 
@@ -87,14 +77,11 @@ class GNNMultiPMTDataset(H5Dataset):
 
         n_mpmts = len(unique_mpmts)
 
-        if n_mpmts == 0:
-            raise RuntimeError(
-                f"Event {item} contains no hit mPMTs and cannot form a graph."
-            )
+        # if n_mpmts == 0:
+        #     raise RuntimeError(
+        #         f"Event {item} contains no hit mPMTs and cannot form a graph."
+        #     )
 
-        # ====================================================
-        # mPMT node features
-        # ====================================================
         mpmt_pos = self.mpmt_positions[:, unique_mpmts].T
         mpmt_ori = self.mpmt_orientations[:, unique_mpmts].T
 
@@ -130,9 +117,6 @@ class GNNMultiPMTDataset(H5Dataset):
                 axis=1,
             )
 
-        # ====================================================
-        # PMT node features
-        # ====================================================
         hit_pmt_global_pos = self.pmt_positions[:, self.event_hit_pmts].T
         parent_mpmt_pos = self.mpmt_positions[:, hit_mpmts].T
 
@@ -152,9 +136,6 @@ class GNNMultiPMTDataset(H5Dataset):
             axis=1,
         )
 
-        # ====================================================
-        # PMT <-> parent mPMT edges
-        # ====================================================
         n_hits_total = len(self.event_hit_pmts)
 
         pmt_to_mpmt = torch.tensor(
@@ -169,9 +150,6 @@ class GNNMultiPMTDataset(H5Dataset):
 
         mpmt_to_pmt = pmt_to_mpmt.flip(0)
 
-        # ====================================================
-        # mPMT -> mPMT spatial kNN edges
-        # ====================================================
         mpmt_pos_tensor = torch.tensor(
             mpmt_pos / 100.0,
             dtype=torch.float32,
@@ -199,10 +177,7 @@ class GNNMultiPMTDataset(H5Dataset):
                 (0, 4),
                 dtype=torch.float32,
             )
-
-        # ====================================================
-        # PMT -> PMT edges inside each mPMT
-        # ====================================================
+    
         pmt_edges = []
 
         for mpmt_local_idx in range(n_mpmts):
@@ -243,9 +218,6 @@ class GNNMultiPMTDataset(H5Dataset):
                 dtype=torch.long,
             )
 
-        # ====================================================
-        # Build heterogeneous graph
-        # ====================================================
         hetero_data = HeteroData()
 
         hetero_data["pmt"].x = torch.tensor(
@@ -278,15 +250,7 @@ class GNNMultiPMTDataset(H5Dataset):
             "mpmt", "neighbours", "mpmt"
         ].edge_attr = mpmt_edge_attr
 
-        # ====================================================
-        # Graph-level truth
-        #
-        # PyG concatenates graph-level tensors across a batch.
-        # The leading singleton dimension therefore matters:
-        #
-        # positions: [1, 2, 3] per graph -> [B, 2, 3]
-        # ring_mask: [1, 2] per graph     -> [B, 2]
-        # ====================================================
+
         hetero_data["positions"] = torch.tensor(
             data_dict["positions"],
             dtype=torch.float32,
@@ -322,11 +286,6 @@ class GNNMultiPMTDataset(H5Dataset):
             dtype=torch.long,
         )
 
-
-        # ====================================================
-        # Virtual node - same feature definition as your
-        # existing dataset.
-        # ====================================================
         virtual_node = np.array(
             [
                 [
