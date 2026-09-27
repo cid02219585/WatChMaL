@@ -1,3 +1,37 @@
+# Updates
+
+This contains a version of the existing WatChMaL repository with the addition of GNNs (specifically non-hierarchical GAT-attention based and hierarchical Transformer-attention based models) for single-ring event reconstruction, encoder-decoder architectures with ResNet and GNN encoders, and a Transformer decoder for fixed two-ring reconstruction and combined single-ring and two-ring reconstruction. 
+
+# Specific additions / modifications
+
+Single-ring
+- GNN architecture files
+- Dataset files for graph-based models
+- Respective config files
+- Analysis notebooks for GNN runs
+
+Two-ring
+- GNN encoder and Transformer decoder file
+- HDF5 dataset loader file for two rings
+- ResNet encoder and Transformer decoder file
+- New engine with matching cost computation
+- Respective config files
+- Modified analysis files for two predictions
+- Analysis notebooks for runs
+
+Combined single-ring and two-ring
+- Modified GNN encoder and Transformer decoder file
+- HDF5 dataset loader file for variable number of rings
+- New engine with matching cost including classification
+- Respective config files
+- Modified analysis files for variable predictions
+- Analysis notebooks for runs
+
+# Usage
+
+Comments at the start of each file modified or added outline the changes made to each file and their purpose. The submission scripts on HEP are in /vols/hyperk/users/sc4422/first_run/scripts/gnn/. The subfolder of exploration/ contains the single ring GNNs, multiring/ contains the two ring runs (including the ResNet encoder), and var_multi/ for single and two ring mixed events. 
+
+
 # Water Cherenkov Machine Learning (WatChMaL)
 
 # Description
