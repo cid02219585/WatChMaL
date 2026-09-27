@@ -1,4 +1,4 @@
-# Updates
+# Updates (GNN and multiring work)
 
 This contains a version of the existing WatChMaL repository with the addition of GNNs (specifically non-hierarchical GAT-attention based and hierarchical Transformer-attention based models) for single-ring event reconstruction, encoder-decoder architectures with ResNet and GNN encoders, and a Transformer decoder for fixed two-ring reconstruction and combined single-ring and two-ring reconstruction. 
 
