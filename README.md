@@ -31,6 +31,8 @@ Combined single-ring and two-ring
 
 Comments at the start of each file modified or added outline the changes made to each file and their purpose. The submission scripts on HEP are in /vols/hyperk/users/sc4422/first_run/scripts/gnn/. The subfolder of exploration/ contains the single ring GNNs, multiring/ contains the two ring runs (including the ResNet encoder), and var_multi/ for single and two ring mixed events. 
 
+For the single ring case, the versions of the models in the model files is the final optimised architecture. For the fixed two ring case, auxiliary layer losses and reintroducing slot embeddings during attention was helpful to all decoders (and can be included with aux loss and reinject flags, with both defaulted to be included in the current submission files / config set up). For the second exploration with slot competition, direction loss, and separate heads, these are commented out in the model and engine files. For the Hierarchical Transformer encoder, separate heads and direction loss was the best, for the Non Hierarchical GAT encoder direction loss was the best, while for ResNet separate heads was the best, so to get these models the respective modifications must be included in the files. Since the decoder for the Hierarchical Transformer encoder and Non Hierarchical GAT encoder is in the same file, but have different best performing set-ups, they have to be changed between runs. For direction loss (and auxiliary layer losses if this is changed), the corresponding correct compute_metrics function in the engine file must also be commented out. 
+
 
 # Water Cherenkov Machine Learning (WatChMaL)
 
