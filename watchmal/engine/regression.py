@@ -1,3 +1,5 @@
+### Added support for graph based models by handling PyG graph objects
+
 import torch
 
 from watchmal.engine.reconstruction import ReconstructionEngine

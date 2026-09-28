@@ -1,6 +1,9 @@
 ### Homogeneous graph-based model attempts (addition of GAT, GATv2, GATEdge, GATc2Edge)
 # submission files are in  /vols/hyperk/users/sc4422/first_run/scripts/gnn - may need to change model to match the corresponding config name + add / remove relevant hyperparameters
 
+import torch
+import torch.nn.functional as F
+import torch_geometric
 
 class GATv2Edge(torch.nn.Module):
     def __init__(self, in_feat=8, h_feat=8, num_output_channels=4, heads=4):
