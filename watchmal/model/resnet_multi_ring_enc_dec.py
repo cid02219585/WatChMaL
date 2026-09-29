@@ -861,6 +861,7 @@ class EncoderDecoder(nn.Module):
         # x_dense = self.memory_norm(x_dense)
         return self.decoder(x_dense)
     
+# attempt with positional embedding
 # class EncoderDecoder(nn.Module):
 #     def __init__(
 #         self,

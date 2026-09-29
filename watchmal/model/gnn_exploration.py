@@ -321,394 +321,6 @@ class HierTrans(nn.Module):
 # submission scripts in /vols/hyperk/users/sc4422/first_run/scripts/gnn
 # model path in config may need changing since the models were moved here from gnn.py
 
-# class HeteroConvol(nn.Module):
-#     def __init__(self,
-#         pmt_in, 
-#         mpmt_in, 
-#         h_feat, 
-#         num_output_channels, 
-#         dropout,
-#         num_heads=4,
-#         num_layers=3, 
-#         aggr='sum',
-#     ):
-#         super().__init__()
-#         self.dropout = dropout
-
-#         self.convs = torch.nn.ModuleList([HeteroConv({
-#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((pmt_in, mpmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(mpmt_in, h_feat, heads=num_heads, concat=False),
-#                 ('mpmt', 'contains', 'pmt'): GATConv((mpmt_in, pmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#                 # ('pmt', 'neighbours', 'pmt'): GATConv(pmt_in, h_feat, heads=num_heads, concat=False),
-#             }, aggr=aggr)])
-
-#         for _ in range(num_layers-1):
-#             conv = HeteroConv({
-#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
-#                 ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#                 # ('pmt', 'neighbours', 'pmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
-#             }, aggr=aggr)
-#             self.convs.append(conv)
-
-#         self.out_layer = nn.Linear(h_feat, num_output_channels)
-
-#     def forward(self, data):
-#         x_dict = {
-#             'pmt':  data['pmt'].x,
-#             'mpmt': data['mpmt'].x,
-#         }
-#         edge_index_dict = {
-#             ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
-#             ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
-#             ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
-#             # ('pmt',  'neighbours', 'pmt'):  data['pmt',  'neighbours', 'pmt'].edge_index,
-#         }
-
-#         for conv in self.convs:
-#             x_dict = conv(x_dict, edge_index_dict)
-#             x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
-#                       for key, x in x_dict.items()}
-
-#         out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
-
-#         return self.out_layer(out)
-
-
-class LocalPMTGAT(nn.Module):
-    def __init__(self, hidden_channels, num_heads=4):
-        super().__init__()
-        assert hidden_channels % num_heads == 0
-
-        self.num_heads = num_heads
-        self.head_dim = hidden_channels // num_heads
-
-        self.q = nn.Linear(hidden_channels, hidden_channels)
-        self.k = nn.Linear(hidden_channels, hidden_channels)
-        self.v = nn.Linear(hidden_channels, hidden_channels)
-
-        self.update = nn.Sequential(
-            nn.Linear(2 * hidden_channels, hidden_channels),
-            nn.ReLU(),
-            nn.LayerNorm(hidden_channels),
-            nn.Linear(hidden_channels, hidden_channels),
-        )
-
-    def forward(self, x, edge_index):
-        row, col = edge_index
-
-        Q = self.q(x).view(-1, self.num_heads, self.head_dim)
-        K = self.k(x).view(-1, self.num_heads, self.head_dim)
-        V = self.v(x).view(-1, self.num_heads, self.head_dim)
-
-        scores = (Q[row] * K[col]).sum(-1) / self.head_dim ** 0.5
-        attn = softmax(scores, index=row)
-
-        msg = attn.unsqueeze(-1) * V[col]
-        msg = msg.view(-1, x.size(-1))
-
-        agg = torch.zeros_like(x)
-        agg.scatter_add_(0, row.unsqueeze(-1).expand_as(msg), msg)
-
-        return self.update(torch.cat([x, agg], dim=-1)) + x
-
-
-class HeteroConvol(nn.Module):
-    def __init__(self,
-        pmt_in, 
-        mpmt_in, 
-        h_feat, 
-        num_output_channels, 
-        dropout,
-        num_heads=4,
-        num_layers=3, 
-        num_local=1,
-        aggr='sum',
-    ):
-        super().__init__()
-        self.dropout = dropout
-
-        self.pmt_enc  = nn.Linear(pmt_in,  h_feat)
-        self.mpmt_enc = nn.Linear(mpmt_in, h_feat)
-
-        self.local_layers = nn.ModuleList([
-            LocalPMTGAT(h_feat, num_heads=num_heads)
-            for _ in range(num_local)
-        ])
-
-        self.convs = torch.nn.ModuleList([
-            HeteroConv({
-                ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-                ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
-                ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-            }, aggr=aggr)
-            for _ in range(num_layers)
-        ])
-
-        self.out_layer = nn.Linear(h_feat, num_output_channels)
-
-    def forward(self, data):
-        x_p = self.pmt_enc(data['pmt'].x)
-        x_m = self.mpmt_enc(data['mpmt'].x)
-
-        pmt_edges = data['pmt', 'neighbours', 'pmt'].edge_index
-
-        for layer in self.local_layers:
-            x_p = layer(x_p, pmt_edges)
-
-        x_dict = {
-            'pmt':  x_p,
-            'mpmt': x_m,
-        }
-        edge_index_dict = {
-            ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
-            ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
-            ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
-        }
-
-        for conv in self.convs:
-            x_dict = conv(x_dict, edge_index_dict)
-            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
-                      for key, x in x_dict.items()}
-
-        out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
-        return self.out_layer(out)
-
-# class HeteroConvol(nn.Module):
-#     def __init__(self,
-#         pmt_in, 
-#         mpmt_in, 
-#         h_feat, 
-#         num_output_channels, 
-#         dropout,
-#         num_heads=4,
-#         num_layers=3, 
-#         aggr='sum',
-#     ):
-#         super().__init__()
-#         self.dropout = dropout
-
-#         self.convs = torch.nn.ModuleList([HeteroConv({
-#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, mpmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(mpmt_in, h_feat, heads=num_heads, concat=False),
-#                 ('mpmt', 'contains', 'pmt'): GATConv((mpmt_in, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#             }, aggr=aggr)])
-
-#         for _ in range(num_layers-1):
-#             conv = HeteroConv({
-#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
-#                 ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
-#             }, aggr=aggr)
-#             self.convs.append(conv)
-
-#         self.out_layer = nn.Linear(h_feat, num_output_channels)
-
-#     def forward(self, data):
-#         x_dict = {
-#             'pmt':  data['pmt'].x,
-#             'mpmt': data['mpmt'].x,
-#         }
-#         edge_index_dict = {
-#             ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
-#             ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
-#             ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
-#         }
-
-#         for conv in self.convs:
-#             x_dict = conv(x_dict, edge_index_dict)
-#             x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
-#                       for key, x in x_dict.items()}
-
-#         out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
-#         return self.out_layer(out)
-
-
-
-### without pmt pmt
-# class HierarchicalHetGAT(nn.Module):
-#     def __init__(self, pmt_in, mpmt_in, h_feat, num_output_channels,
-#                 num_global=3, heads=4, dropout=0.0):
-#         super().__init__()
-#         self.pmt_enc  = nn.Linear(pmt_in,  h_feat)
-#         self.mpmt_enc = nn.Linear(mpmt_in, h_feat)
-
-#         self.pool_conv = GATConv((h_feat, h_feat), h_feat, heads=heads,
-#                                 concat=False, add_self_loops=False)
-
-#         self.global_layers = nn.ModuleList([
-#             GATConv(h_feat, h_feat, heads=heads, concat=False)
-#             for _ in range(num_global)
-#         ])
-
-#         self.drop = nn.Dropout(dropout)
-#         self.out_layer = nn.Linear(h_feat, num_output_channels)
-
-#     def forward(self, data):
-#         x_p = self.pmt_enc(data['pmt'].x)
-#         x_m = self.mpmt_enc(data['mpmt'].x)
-
-#         belongs_to = data['pmt', 'belongs_to', 'mpmt'].edge_index
-#         mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
-
-#         # straight to attention pooling
-#         x_m = x_m + F.relu(self.pool_conv(
-#             (x_p, x_m), belongs_to,
-#             size=(x_p.size(0), x_m.size(0)),
-#         ))
-
-#         for conv in self.global_layers:
-#             x_m = self.drop(x_m + F.relu(conv(x_m, mpmt_edges)))
-
-#         out = global_add_pool(x_m, data['mpmt'].batch)
-#         return self.out_layer(out)
-
-# with pmt pmt - using the custom
-
-class HierarchicalHetGAT(nn.Module):
-    def __init__(self, pmt_in, mpmt_in, h_feat, num_output_channels,
-                 num_local=1, num_global=3, heads=4, dropout=0.0):
-        super().__init__()
-        self.pmt_enc  = nn.Linear(pmt_in,  h_feat)
-        self.mpmt_enc = nn.Linear(mpmt_in, h_feat)
-
-        self.local_layers = nn.ModuleList([
-            LocalPMTGAT(h_feat, num_heads=heads)
-            for _ in range(num_local)
-        ])
-
-        self.pool_conv = GATConv((h_feat, h_feat), h_feat, heads=heads,
-                                 concat=False, add_self_loops=False)
-
-        self.global_layers = nn.ModuleList([
-            GATConv(h_feat, h_feat, heads=heads, concat=False)
-            for _ in range(num_global)
-        ])
-
-        self.drop = nn.Dropout(dropout)
-        self.out_layer = nn.Linear(h_feat, num_output_channels)
-
-    def forward(self, data):
-        x_p = self.pmt_enc(data['pmt'].x)
-        x_m = self.mpmt_enc(data['mpmt'].x)
-
-        pmt_edges  = data['pmt', 'neighbours', 'pmt'].edge_index
-        belongs_to = data['pmt', 'belongs_to', 'mpmt'].edge_index
-        mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
-
-        for layer in self.local_layers:
-            x_p = layer(x_p, pmt_edges)
-
-        x_m = x_m + F.relu(self.pool_conv(
-            (x_p, x_m), belongs_to,
-            size=(x_p.size(0), x_m.size(0)),
-        ))
-
-        for conv in self.global_layers:
-            x_m = self.drop(x_m + F.relu(conv(x_m, mpmt_edges)))
-
-        out = global_add_pool(x_m, data['mpmt'].batch)
-        return self.out_layer(out)
-
-# class HierarchicalHetGAT(nn.Module):
-#     def __init__(self, pmt_in, mpmt_in, h_feat, num_output_channels,
-#                  num_local=1, num_global=3, heads=4, dropout=0.0):
-#         super().__init__()
-#         self.pmt_enc  = nn.Linear(pmt_in,  h_feat)
-#         self.mpmt_enc = nn.Linear(mpmt_in, h_feat)
-
-#         self.local_layers = nn.ModuleList([
-#             GATConv(h_feat, h_feat, heads=heads, concat=False)
-#             for _ in range(num_local)
-#         ])
-
-#         # learned attention pooling pmt -> mpmt (replaces their scatter_mean)
-#         self.pool_conv = GATConv((h_feat, h_feat), h_feat, heads=heads,
-#                                  concat=False, add_self_loops=False)
-
-#         self.global_layers = nn.ModuleList([
-#             GATConv(h_feat, h_feat, heads=heads, concat=False)
-#             for _ in range(num_global)
-#         ])
-
-#         self.drop = nn.Dropout(dropout)
-#         self.out_layer = nn.Linear(h_feat, num_output_channels)
-
-#     def forward(self, data):
-#         x_p = self.pmt_enc(data['pmt'].x)
-#         x_m = self.mpmt_enc(data['mpmt'].x)
-
-#         pmt_edges  = data['pmt',  'neighbours', 'pmt'].edge_index
-#         belongs_to = data['pmt',  'belongs_to', 'mpmt'].edge_index
-#         mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
-
-#         # stage 1: local intra-mPMT
-#         for conv in self.local_layers:
-#             x_p = x_p + F.relu(conv(x_p, pmt_edges))
-
-#         # stage 2: attention-pooled hand-off (mpmt features are the queries)
-#         x_m = x_m + F.relu(self.pool_conv(
-#             (x_p, x_m), belongs_to,
-#             size=(x_p.size(0), x_m.size(0)),
-#         ))
-
-#         # stage 3: global inter-mPMT
-#         for conv in self.global_layers:
-#             x_m = self.drop(x_m + F.relu(conv(x_m, mpmt_edges)))
-
-#         out = global_add_pool(x_m, data['mpmt'].batch)
-#         return self.out_layer(out)
-
-# class HierarchicalHetGAT(nn.Module):
-#     def __init__(self, pmt_in, mpmt_in, h_feat, num_output_channels,
-#                  num_local=1, num_global=3, heads=4, dropout=0.0):
-#         super().__init__()
-#         self.pmt_enc  = nn.Linear(pmt_in,  h_feat)
-#         self.mpmt_enc = nn.Linear(mpmt_in, h_feat)
-
-#         self.local_layers = nn.ModuleList([
-#             GATConv(h_feat, h_feat, heads=heads, concat=False)
-#             for _ in range(num_local)
-#         ])
-
-#         # learned attention pooling pmt -> mpmt (replaces their scatter_mean)
-#         self.pool_conv = GATConv((h_feat, h_feat), h_feat, heads=heads,
-#                                  concat=False, add_self_loops=False)
-
-#         self.global_layers = nn.ModuleList([
-#             GATConv(h_feat, h_feat, heads=heads, concat=False)
-#             for _ in range(num_global)
-#         ])
-
-#         self.drop = nn.Dropout(dropout)
-#         self.out_layer = nn.Linear(h_feat, num_output_channels)
-
-#     def forward(self, data):
-#         x_p = self.pmt_enc(data['pmt'].x)
-#         x_m = self.mpmt_enc(data['mpmt'].x)
-
-#         pmt_edges  = data['pmt',  'neighbours', 'pmt'].edge_index
-#         belongs_to = data['pmt',  'belongs_to', 'mpmt'].edge_index
-#         mpmt_edges = data['mpmt', 'neighbours', 'mpmt'].edge_index
-
-#         # stage 1: local intra-mPMT
-#         for conv in self.local_layers:
-#             x_p = x_p + F.relu(conv(x_p, pmt_edges))
-
-#         # stage 2: attention-pooled hand-off (mpmt features are the queries)
-#         x_m = x_m + F.relu(self.pool_conv(
-#             (x_p, x_m), belongs_to,
-#             size=(x_p.size(0), x_m.size(0)),
-#         ))
-
-#         # stage 3: global inter-mPMT
-#         for conv in self.global_layers:
-#             x_m = self.drop(x_m + F.relu(conv(x_m, mpmt_edges)))
-
-#         out = global_add_pool(x_m, data['mpmt'].batch)
-#         return self.out_layer(out)
-        
-
 import sys
 sys.modules['pyg_lib'] = None  # must be before any torch_geometric imports
 
@@ -1056,3 +668,205 @@ class HGTMPMTOnly(torch.nn.Module):
 
         return self.mlp(x)
 
+
+# class HeteroConvol(nn.Module):
+#     def __init__(self,
+#         pmt_in, 
+#         mpmt_in, 
+#         h_feat, 
+#         num_output_channels, 
+#         dropout,
+#         num_heads=4,
+#         num_layers=3, 
+#         aggr='sum',
+#     ):
+#         super().__init__()
+#         self.dropout = dropout
+
+#         self.convs = torch.nn.ModuleList([HeteroConv({
+#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((pmt_in, mpmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(mpmt_in, h_feat, heads=num_heads, concat=False),
+#                 ('mpmt', 'contains', 'pmt'): GATConv((mpmt_in, pmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#                 # ('pmt', 'neighbours', 'pmt'): GATConv(pmt_in, h_feat, heads=num_heads, concat=False),
+#             }, aggr=aggr)])
+
+#         for _ in range(num_layers-1):
+#             conv = HeteroConv({
+#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
+#                 ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#                 # ('pmt', 'neighbours', 'pmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
+#             }, aggr=aggr)
+#             self.convs.append(conv)
+
+#         self.out_layer = nn.Linear(h_feat, num_output_channels)
+
+#     def forward(self, data):
+#         x_dict = {
+#             'pmt':  data['pmt'].x,
+#             'mpmt': data['mpmt'].x,
+#         }
+#         edge_index_dict = {
+#             ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
+#             ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
+#             ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+#             # ('pmt',  'neighbours', 'pmt'):  data['pmt',  'neighbours', 'pmt'].edge_index,
+#         }
+
+#         for conv in self.convs:
+#             x_dict = conv(x_dict, edge_index_dict)
+#             x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
+#                       for key, x in x_dict.items()}
+
+#         out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+
+#         return self.out_layer(out)
+
+
+class LocalPMTGAT(nn.Module):
+    def __init__(self, hidden_channels, num_heads=4):
+        super().__init__()
+        assert hidden_channels % num_heads == 0
+
+        self.num_heads = num_heads
+        self.head_dim = hidden_channels // num_heads
+
+        self.q = nn.Linear(hidden_channels, hidden_channels)
+        self.k = nn.Linear(hidden_channels, hidden_channels)
+        self.v = nn.Linear(hidden_channels, hidden_channels)
+
+        self.update = nn.Sequential(
+            nn.Linear(2 * hidden_channels, hidden_channels),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_channels),
+            nn.Linear(hidden_channels, hidden_channels),
+        )
+
+    def forward(self, x, edge_index):
+        row, col = edge_index
+
+        Q = self.q(x).view(-1, self.num_heads, self.head_dim)
+        K = self.k(x).view(-1, self.num_heads, self.head_dim)
+        V = self.v(x).view(-1, self.num_heads, self.head_dim)
+
+        scores = (Q[row] * K[col]).sum(-1) / self.head_dim ** 0.5
+        attn = softmax(scores, index=row)
+
+        msg = attn.unsqueeze(-1) * V[col]
+        msg = msg.view(-1, x.size(-1))
+
+        agg = torch.zeros_like(x)
+        agg.scatter_add_(0, row.unsqueeze(-1).expand_as(msg), msg)
+
+        return self.update(torch.cat([x, agg], dim=-1)) + x
+
+
+class HeteroConvol(nn.Module):
+    def __init__(self,
+        pmt_in, 
+        mpmt_in, 
+        h_feat, 
+        num_output_channels, 
+        dropout,
+        num_heads=4,
+        num_layers=3, 
+        num_local=1,
+        aggr='sum',
+    ):
+        super().__init__()
+        self.dropout = dropout
+
+        self.pmt_enc  = nn.Linear(pmt_in,  h_feat)
+        self.mpmt_enc = nn.Linear(mpmt_in, h_feat)
+
+        self.local_layers = nn.ModuleList([
+            LocalPMTGAT(h_feat, num_heads=num_heads)
+            for _ in range(num_local)
+        ])
+
+        self.convs = torch.nn.ModuleList([
+            HeteroConv({
+                ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+                ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
+                ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+            }, aggr=aggr)
+            for _ in range(num_layers)
+        ])
+
+        self.out_layer = nn.Linear(h_feat, num_output_channels)
+
+    def forward(self, data):
+        x_p = self.pmt_enc(data['pmt'].x)
+        x_m = self.mpmt_enc(data['mpmt'].x)
+
+        pmt_edges = data['pmt', 'neighbours', 'pmt'].edge_index
+
+        for layer in self.local_layers:
+            x_p = layer(x_p, pmt_edges)
+
+        x_dict = {
+            'pmt':  x_p,
+            'mpmt': x_m,
+        }
+        edge_index_dict = {
+            ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
+            ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
+            ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+        }
+
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
+                      for key, x in x_dict.items()}
+
+        out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+        return self.out_layer(out)
+
+# class HeteroConvol(nn.Module):
+#     def __init__(self,
+#         pmt_in, 
+#         mpmt_in, 
+#         h_feat, 
+#         num_output_channels, 
+#         dropout,
+#         num_heads=4,
+#         num_layers=3, 
+#         aggr='sum',
+#     ):
+#         super().__init__()
+#         self.dropout = dropout
+
+#         self.convs = torch.nn.ModuleList([HeteroConv({
+#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, mpmt_in), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(mpmt_in, h_feat, heads=num_heads, concat=False),
+#                 ('mpmt', 'contains', 'pmt'): GATConv((mpmt_in, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#             }, aggr=aggr)])
+
+#         for _ in range(num_layers-1):
+#             conv = HeteroConv({
+#                 ('pmt', 'belongs_to', 'mpmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#                 ('mpmt', 'neighbours', 'mpmt'): GATConv(h_feat, h_feat, heads=num_heads, concat=False),
+#                 ('mpmt', 'contains', 'pmt'): GATConv((h_feat, h_feat), h_feat, heads=num_heads, concat=False, add_self_loops=False),
+#             }, aggr=aggr)
+#             self.convs.append(conv)
+
+#         self.out_layer = nn.Linear(h_feat, num_output_channels)
+
+#     def forward(self, data):
+#         x_dict = {
+#             'pmt':  data['pmt'].x,
+#             'mpmt': data['mpmt'].x,
+#         }
+#         edge_index_dict = {
+#             ('pmt',  'belongs_to', 'mpmt'): data['pmt',  'belongs_to', 'mpmt'].edge_index,
+#             ('mpmt', 'contains',   'pmt'):  data['mpmt', 'contains',   'pmt'].edge_index,
+#             ('mpmt', 'neighbours', 'mpmt'): data['mpmt', 'neighbours', 'mpmt'].edge_index,
+#         }
+
+#         for conv in self.convs:
+#             x_dict = conv(x_dict, edge_index_dict)
+#             x_dict = {key: F.dropout(F.relu(x), self.dropout, training=self.training)
+#                       for key, x in x_dict.items()}
+
+#         out = global_add_pool(x_dict['mpmt'], data['mpmt'].batch)
+#         return self.out_layer(out)

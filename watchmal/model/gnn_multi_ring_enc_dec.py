@@ -1,7 +1,8 @@
 ### Encoder-decoder architecture to handle fixed two-ring events, with NonHierGAT, HierTrans as the encoders - architectures from the single ring code (but producing hidden embeddings instead of output predictions)
 # Transformer decoder uses PyTorch implementation as baseline, then modifications (e.g. slot competition, auxiliary direction loss) were tested on top of this 
 # The ablations of slot embedding reinjection and auxiliary layer losses are implemented as flags, with current submission defaulting both to be true (as both were beneficial across all models)
-# The ablations of slot competition, direction loss, and separate heads (and there respective combinations) are commented out blocks of code (e.g. slot competition is a new _mha_block, so to use it the other _mha_block has to be commented out)
+# The ablations of slot competition, direction loss, and separate heads (and their respective combinations - so it can get a bit messy) are commented out blocks of code (e.g. slot competition is a new _mha_block, so to use it the other _mha_block has to be commented out)
+
 # submission scripts are in /vols/hyperk/users/sc4422/first_run/scripts/gnn/multiring
 
 import torch
@@ -656,13 +657,13 @@ class CrossAttnDecoder(nn.Module):
             norm=nn.LayerNorm(h_feat_dec),
         )
 
-        # Shared head across slots
-        # self.head = nn.Sequential(
-        #     nn.LayerNorm(h_feat_dec),
-        #     nn.Linear(h_feat_dec, h_feat_dec),
-        #     nn.GELU(),
-        #     nn.Linear(h_feat_dec, num_output_channels),
-        # )
+# Shared head across slots
+        self.head = nn.Sequential(
+            nn.LayerNorm(h_feat_dec),
+            nn.Linear(h_feat_dec, h_feat_dec),
+            nn.GELU(),
+            nn.Linear(h_feat_dec, num_output_channels),
+        )
 
 # sep heads
         # self.heads = nn.ModuleList([
@@ -678,22 +679,23 @@ class CrossAttnDecoder(nn.Module):
 
 
 # dir loss
-        self.output_features = nn.Sequential(
-            nn.LayerNorm(h_feat_dec),
-            nn.Linear(h_feat_dec, h_feat_dec),
-            nn.GELU(),
-        )
+        # self.output_features = nn.Sequential(
+        #     nn.LayerNorm(h_feat_dec),
+        #     nn.Linear(h_feat_dec, h_feat_dec),
+        #     nn.GELU(),
+        # )
 
-        self.position_head = nn.Linear(
-            h_feat_dec,
-            num_output_channels,
-        )
+        # self.position_head = nn.Linear(
+        #     h_feat_dec,
+        #     num_output_channels,
+        # )
 
-        self.direction_head = nn.Linear(
-            h_feat_dec,
-            3,
-        )
-# ## sep heads with dir 
+        # self.direction_head = nn.Linear(
+        #     h_feat_dec,
+        #     3,
+        # )
+
+# Dir loss + sep heads
         # self.position_heads = nn.ModuleList([nn.Linear(
         #     h_feat_dec,
         #     num_output_channels,
@@ -704,40 +706,6 @@ class CrossAttnDecoder(nn.Module):
         #     3,
         # ) for _ in range(num_slots)])
 
-    # def forward(self, x_m, batch):
-    #     x_dense, mask = to_dense_batch(x_m, batch)
-
-    #     batch_size = x_dense.size(0)
-
-    #     queries = self.slot_queries.unsqueeze(0).expand(
-    #         batch_size, -1, -1
-    #     )
-
-    #     if self.reinject:
-    #         tgt, query_pos = torch.zeros_like(queries), queries
-    #     else:
-    #         tgt = queries
-
-
-    #     decoded = self.decoder(
-    #         tgt=tgt,
-    #         memory=x_dense,
-    #         memory_key_padding_mask=~mask,#
-    #         query_pos=query_pos if self.reinject else None, ## could amke it a flag
-    #         return_intermediate=self.aux_loss and self.training,
-    #     )
-
-    #     return self.head(decoded)
-
-    #     return torch.stack(
-    #         [
-    #             self.heads[i](decoded[..., i, :])
-    #             for i in range(self.num_slots)
-    #         ],
-    #         dim=-2,
-    #     )
-
-# direction loss run
     def forward(self, x_m, batch):
         x_dense, mask = to_dense_batch(x_m, batch)
 
@@ -748,36 +716,71 @@ class CrossAttnDecoder(nn.Module):
         )
 
         if self.reinject:
-            tgt = torch.zeros_like(queries)
-            query_pos = queries
+            tgt, query_pos = torch.zeros_like(queries), queries
         else:
             tgt = queries
-            query_pos = None
+
 
         decoded = self.decoder(
             tgt=tgt,
             memory=x_dense,
-            memory_key_padding_mask=~mask,
-            query_pos=query_pos,
+            memory_key_padding_mask=~mask,#
+            query_pos=query_pos if self.reinject else None, ## could amke it a flag
             return_intermediate=self.aux_loss and self.training,
         )
 
-        features = self.output_features(decoded)
+        return self.head(decoded)
+# Sep heads output
+    #     return torch.stack(
+    #         [
+    #             self.heads[i](decoded[..., i, :])
+    #             for i in range(self.num_slots)
+    #         ],
+    #         dim=-2,
+    #     )
 
-        positions = self.position_head(features)
+# direction loss forward pass
+    # def forward(self, x_m, batch):
+    #     x_dense, mask = to_dense_batch(x_m, batch)
 
-        directions = F.normalize(
-            self.direction_head(features),
-            p=2,
-            dim=-1,
-            eps=1e-8,
-        )
+    #     batch_size = x_dense.size(0)
 
-        return torch.cat(
-            [positions, directions],
-            dim=-1,
-        )
+    #     queries = self.slot_queries.unsqueeze(0).expand(
+    #         batch_size, -1, -1
+    #     )
 
+    #     if self.reinject:
+    #         tgt = torch.zeros_like(queries)
+    #         query_pos = queries
+    #     else:
+    #         tgt = queries
+    #         query_pos = None
+
+    #     decoded = self.decoder(
+    #         tgt=tgt,
+    #         memory=x_dense,
+    #         memory_key_padding_mask=~mask,
+    #         query_pos=query_pos,
+    #         return_intermediate=self.aux_loss and self.training,
+    #     )
+
+    #     features = self.output_features(decoded)
+
+    #     positions = self.position_head(features)
+
+    #     directions = F.normalize(
+    #         self.direction_head(features),
+    #         p=2,
+    #         dim=-1,
+    #         eps=1e-8,
+    #     )
+
+    #     return torch.cat(
+    #         [positions, directions],
+    #         dim=-1,
+    #     )
+
+# dir loss + sep heads forward pass
         # features = self.output_features(decoded)
 
         # positions = torch.stack(
