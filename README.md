@@ -45,8 +45,8 @@ Model files
 
 Engine files
 
-- Single-ring GNN - watchmal/engine/regression.py
-- Fixed two-ring GNN - watchmal/engine/regression_multiring.py
+- Single-ring - watchmal/engine/regression.py
+- Fixed two-ring - watchmal/engine/regression_multiring.py
 - Combined single-ring and two-ring - watchmal/engine/regression_detr.py
 
 # Water Cherenkov Machine Learning (WatChMaL)
