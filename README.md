@@ -49,6 +49,19 @@ Engine files
 - Fixed two-ring - watchmal/engine/regression_multiring.py
 - Combined single-ring and two-ring - watchmal/engine/regression_detr.py
 
+h5 dataloader files
+
+- Single-ring - watchmal/dataset/h5_dataset.py
+- Fixed two-ring - watchmal/dataset/h5_dataset_multiring.py
+- Combined single-ring and two-ring - watchmal/dataset/h5_dataset_single_multi.py
+
+Dataset files
+
+- Single-ring heterogeneous GNN - watchmal/dataset/gnn/gnn_mpmt_dataset_heterogen.py
+- Fixed two-ring GNN - watchmal/dataset/gnn/gnn_mpmt_dataset_heterogen_multiring.py
+- Fixed two-ring ResNet - watchmal/dataset/cnn/cnn_mpmt/cnn_mpmt_dataset_multiring.py
+- Combined single-ring and two-ring GNN - watchmal/dataset/gnn/gnn_mpmt_single_multi.py
+
 # Water Cherenkov Machine Learning (WatChMaL)
 
 # Description
