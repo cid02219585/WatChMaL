@@ -35,11 +35,11 @@ For the single ring case, the versions of the models in the model files is the f
 
 # File locations on WatCHMaL
 
-Single-ring GNN (early homogeneous graph-based model exploration) - watchmal/model/gnn.py
-Single-ring GNN (heterogeneous graph-based model) - watchmal/model/gnn_exploration.py
-Fixed two-ring GNN - watchmal/model/gnn_multi_ring_enc_dec.py
-Fixed two-ring GNN - watchmal/model/resnet_multi_ring_enc_dec.py
-Combined single-ring and two-ring - watchmal/model/gnn_detr.py
+- Single-ring GNN (early homogeneous graph-based model exploration) - watchmal/model/gnn.py
+- Single-ring GNN (heterogeneous graph-based model) - watchmal/model/gnn_exploration.py
+- Fixed two-ring GNN - watchmal/model/gnn_multi_ring_enc_dec.py
+- Fixed two-ring GNN - watchmal/model/resnet_multi_ring_enc_dec.py
+- Combined single-ring and two-ring - watchmal/model/gnn_detr.py
 
 
 
