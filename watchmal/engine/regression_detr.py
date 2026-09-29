@@ -1,8 +1,7 @@
 ### Engine for events containing either one or two rings
 # Since it is a simplified implementation for one and two rings, it does not use the full Hungarian matching algorithm 
 # It also is hardcoded for position as the main regression target, and direction as an auxiliary target
-# option for direction loss ans flag
-# unlike the fixed two ring file, auxiliary layer losses are hardcoded since they were beneficial to all two ring models
+# option for direction loss as a flag, while axuiliary layer losses are computed for all runs, but can be included / not included in the model file
 
 import torch
 import torch.nn.functional as F

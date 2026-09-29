@@ -1,5 +1,6 @@
 ### NonHierGAT and HierTrans encoders with a decoder built for combined ring count and position prediction for variable single-ring and two-ring events
 # Architecture transferred from the fixed two ring case, only made changes to allow for ring count prediction (labelled DETRtransformer to signify this, but does not use the code of the published DETR transformer, uses the standard transformer decoder from pytorch with adaptations)
+# Instead of ablations being commented out, they are all flags that can be set to either include / not include them
 # submission scripts are in /vols/hyperk/users/sc4422/first_run/scripts/gnn/var_multi
 
 import copy
